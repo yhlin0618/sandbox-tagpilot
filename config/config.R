@@ -26,12 +26,16 @@ APP_CONFIG <- list(
   app_title = "精準行銷平台",
   
   # 資料庫設定（Supabase PostgreSQL）
+  # dbname：Supabase 預設為 postgres；trim 避免 Posit Variables 多餘空白；空則用預設
   db = list(
-    host = Sys.getenv("SUPABASE_DB_HOST"),
+    host = trimws(Sys.getenv("SUPABASE_DB_HOST")),
     port = as.integer(Sys.getenv("SUPABASE_DB_PORT", 5432)),
-    user = Sys.getenv("SUPABASE_DB_USER"),
+    user = trimws(Sys.getenv("SUPABASE_DB_USER")),
     password = Sys.getenv("SUPABASE_DB_PASSWORD"),
-    dbname = Sys.getenv("SUPABASE_DB_NAME"),
+    dbname = local({
+      n <- trimws(Sys.getenv("SUPABASE_DB_NAME"))
+      if (!nzchar(n)) "postgres" else n
+    }),
     sslmode = "require"
   ),
   
