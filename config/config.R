@@ -26,15 +26,24 @@ APP_CONFIG <- list(
   app_title = "精準行銷平台",
   
   # 資料庫設定（Supabase PostgreSQL）
-  # dbname：Supabase 預設為 postgres；trim 避免 Posit Variables 多餘空白；空則用預設
+  # dbname：Supabase 託管預設資料庫名稱固定為 postgres（勿誤填專案 ref / postgresql）
   db = list(
     host = trimws(Sys.getenv("SUPABASE_DB_HOST")),
     port = as.integer(Sys.getenv("SUPABASE_DB_PORT", 5432)),
     user = trimws(Sys.getenv("SUPABASE_DB_USER")),
     password = Sys.getenv("SUPABASE_DB_PASSWORD"),
     dbname = local({
+      host <- trimws(Sys.getenv("SUPABASE_DB_HOST"))
+      url <- trimws(Sys.getenv("SUPABASE_URL"))
       n <- trimws(Sys.getenv("SUPABASE_DB_NAME"))
-      if (!nzchar(n)) "postgres" else n
+      if (!nzchar(n)) n <- "postgres"
+      # 連到 Supabase（pooler 或專案網域）時一律用 postgres，避免 Variables 貼錯
+      if (grepl("supabase", host, ignore.case = TRUE) ||
+          (nzchar(url) && grepl("supabase", url, ignore.case = TRUE))) {
+        "postgres"
+      } else {
+        n
+      }
     }),
     sslmode = "require"
   ),
