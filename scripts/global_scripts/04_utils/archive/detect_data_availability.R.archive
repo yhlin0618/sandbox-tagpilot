@@ -1,0 +1,403 @@
+#' Automatic Data Availability Detection Functions
+#'
+#' This file implements MP45 (Automatic Data Availability Detection Metaprinciple)
+#' to detect data availability based on actual data in the system.
+#'
+#' @author Claude
+#' @date 2025-04-07
+
+#' Connect to the application database
+#'
+#' @param db_path Path to the DuckDB database file
+#' @return A database connection object
+#' @export
+connect_to_app_database <- function(db_path = "app_data/app_data.duckdb") {
+  tryCatch({
+    if (!requireNamespace("DBI", quietly = TRUE)) {
+      message("Installing DBI package...")
+      install.packages("DBI")
+    }
+    
+    if (!requireNamespace("duckdb", quietly = TRUE)) {
+      message("Installing duckdb package...")
+      install.packages("duckdb")
+    }
+    
+    # Check if file exists
+    if (!file.exists(db_path)) {
+      stop("Database file does not exist at path: ", db_path)
+    }
+    
+    # Connect to database
+    conn <- DBI::dbConnect(duckdb::duckdb(), dbdir = db_path)
+    message("Successfully connected to database: ", db_path)
+    
+    return(conn)
+  }, error = function(e) {
+    message("Error connecting to database: ", e$message)
+    return(NULL)
+  })
+}
+
+#' Detect marketing channel availability
+#'
+#' Uses R38 (Platform Numbering Convention) to map between platform numbers and names
+#'
+#' @param conn A DBI connection to the app database
+#' @param platform_dict A data frame mapping platform numbers to names
+#' @return A list of channel availability by channel ID
+#' @export
+detect_marketing_channel_availability <- function(conn, platform_dict = NULL) {
+  # Initialize availability registry
+  availability <- list()
+  
+  # If platform dictionary is not provided, try to load it
+  if (is.null(platform_dict)) {
+    platform_dict <- load_platform_dictionary()
+  }
+  
+  # If we still don't have a platform dictionary, use default mapping from R38
+  if (is.null(platform_dict)) {
+    # Default mapping based on R38
+    platform_dict <- data.frame(
+      platform_number = c("1", "2", "3", "4", "5", "6", "7", "9"),
+      platform_name_english = c("Amazon", "Official Website", "Retail Store", 
+                                "Distributor", "Social Media", "eBay", "Cyberbiz", 
+                                "Multi-platform"),
+      code_alias = c("AMZ", "WEB", "RET", "DST", "SOC", "EBY", "CBZ", "MPT"),
+      stringsAsFactors = FALSE
+    )
+  }
+  
+  # Check if we have a valid connection
+  if (is.null(conn) || !DBI::dbIsValid(conn)) {
+    message("Invalid database connection. Cannot detect channel availability.")
+    
+    # Set all channels as unavailable
+    for (i in 1:nrow(platform_dict)) {
+      channel_id <- tolower(gsub(" ", "", platform_dict$platform_name_english[i]))
+      availability[[channel_id]] <- FALSE
+    }
+    
+    return(availability)
+  }
+  
+  # Get all tables in the database
+  tables <- DBI::dbListTables(conn)
+  message("Found ", length(tables), " tables in database")
+  
+  # Check each channel for data
+  for (i in 1:nrow(platform_dict)) {
+    platform_num <- platform_dict$platform_number[i]
+    platform_name <- platform_dict$platform_name_english[i]
+    channel_id <- tolower(gsub(" ", "", platform_name))
+    
+    # Initially mark as unavailable
+    availability[[channel_id]] <- FALSE
+    
+    # Check for channel-specific tables using numeric prefixes (per R38)
+    platform_tables <- grep(paste0("^p", platform_num, "_"), tables, value = TRUE)
+    
+    # Also check for tables with platform name
+    name_tables <- grep(tolower(channel_id), tolower(tables), value = TRUE)
+    
+    # If we found any tables, check if they have data
+    all_tables <- unique(c(platform_tables, name_tables))
+    
+    if (length(all_tables) > 0) {
+      message("Found ", length(all_tables), " tables for platform: ", platform_name)
+      
+      # Check if any table has data
+      for (table in all_tables) {
+        tryCatch({
+          query <- paste0("SELECT COUNT(*) as count FROM \"", table, "\"")
+          result <- DBI::dbGetQuery(conn, query)
+          
+          if (result$count[1] > 0) {
+            availability[[channel_id]] <- TRUE
+            message("Platform ", platform_name, " (", channel_id, ") has data in table: ", table)
+            break  # Found data, no need to check other tables
+          }
+        }, error = function(e) {
+          message("Error checking table ", table, " for platform ", platform_name, ": ", e$message)
+        })
+      }
+    } 
+    
+    # If still not available, check for platform ID in customer profile or dna tables
+    if (!availability[[channel_id]]) {
+      tryCatch({
+        # Check in df_customer_profile
+        if ("df_customer_profile" %in% tables) {
+          query <- paste0("SELECT COUNT(*) as count FROM df_customer_profile WHERE platform_id = ", platform_num)
+          result <- DBI::dbGetQuery(conn, query)
+          
+          if (result$count[1] > 0) {
+            availability[[channel_id]] <- TRUE
+            message("Platform ", platform_name, " (", channel_id, ") has data in df_customer_profile table")
+          }
+        }
+        
+        # Check in df_dna_by_customer if still not available
+        if (!availability[[channel_id]] && "df_dna_by_customer" %in% tables) {
+          query <- paste0("SELECT COUNT(*) as count FROM df_dna_by_customer WHERE platform = ", platform_num)
+          result <- DBI::dbGetQuery(conn, query)
+          
+          if (result$count[1] > 0) {
+            availability[[channel_id]] <- TRUE
+            message("Platform ", platform_name, " (", channel_id, ") has data in df_dna_by_customer table")
+          }
+        }
+      }, error = function(e) {
+        message("Error checking profile/dna tables for platform ", platform_name, ": ", e$message)
+      })
+    }
+    
+    # If still not available, check if there's a sales table with a platform/channel column
+    if (!availability[[channel_id]]) {
+      tryCatch({
+        # Try to find a general sales table
+        sales_tables <- grep("sales", tolower(tables), value = TRUE)
+        
+        for (sales_table in sales_tables) {
+          # Check if this table has a channel or platform column
+          cols_query <- paste0("SELECT * FROM \"", sales_table, "\" LIMIT 0")
+          cols_result <- DBI::dbGetQuery(conn, cols_query)
+          cols <- names(cols_result)
+          
+          channel_cols <- grep("channel|platform", tolower(cols), value = TRUE)
+          if (length(channel_cols) > 0) {
+            # Check if there's data for this platform
+            for (col in channel_cols) {
+              # Try with platform number
+              num_query <- paste0("SELECT COUNT(*) as count FROM \"", sales_table, 
+                                 "\" WHERE ", col, " = '", platform_num, "'")
+              
+              tryCatch({
+                num_result <- DBI::dbGetQuery(conn, num_query)
+                if (num_result$count[1] > 0) {
+                  availability[[channel_id]] <- TRUE
+                  message("Platform ", platform_name, " (", channel_id, 
+                         ") has data in table: ", sales_table, " with platform number")
+                  break
+                }
+              }, error = function(e) {
+                # Skip this query if it fails
+              })
+              
+              # Try with platform name
+              name_query <- paste0("SELECT COUNT(*) as count FROM \"", sales_table, 
+                                  "\" WHERE LOWER(", col, ") = '", tolower(platform_name), "'")
+              
+              tryCatch({
+                name_result <- DBI::dbGetQuery(conn, name_query)
+                if (name_result$count[1] > 0) {
+                  availability[[channel_id]] <- TRUE
+                  message("Platform ", platform_name, " (", channel_id, 
+                         ") has data in table: ", sales_table, " with platform name")
+                  break
+                }
+              }, error = function(e) {
+                # Skip this query if it fails
+              })
+              
+              # Try with channel ID
+              id_query <- paste0("SELECT COUNT(*) as count FROM \"", sales_table, 
+                               "\" WHERE LOWER(", col, ") = '", channel_id, "'")
+              
+              tryCatch({
+                id_result <- DBI::dbGetQuery(conn, id_query)
+                if (id_result$count[1] > 0) {
+                  availability[[channel_id]] <- TRUE
+                  message("Platform ", platform_name, " (", channel_id, 
+                         ") has data in table: ", sales_table, " with channel ID")
+                  break
+                }
+              }, error = function(e) {
+                # Skip this query if it fails
+              })
+            }
+            
+            if (availability[[channel_id]]) {
+              break  # Found data, no need to check other tables
+            }
+          }
+        }
+      }, error = function(e) {
+        message("Error checking sales tables for platform ", platform_name, ": ", e$message)
+      })
+    }
+    
+    message("Platform ", platform_name, " (", channel_id, ") availability: ", 
+           availability[[channel_id]])
+  }
+  
+  return(availability)
+}
+
+#' Load the platform dictionary from Excel file
+#'
+#' @param file_path Path to the platform dictionary Excel file
+#' @return A data frame with platform mapping, or NULL if not found
+#' @export
+load_platform_dictionary <- function(file_path = NULL) {
+  # Try different potential locations if path not specified
+  if (is.null(file_path)) {
+    # Use file.path for cross-platform compatibility (MP46: Neighborhood Principle)
+    potential_paths <- c(
+      # Primary location - parameters subdirectory (neighborhood organization)
+      file.path("update_scripts", "global_scripts", "30_global_data", "parameters", "platform_dictionary.xlsx"),
+      # Fallback locations
+      file.path("update_scripts", "global_scripts", "30_global_data", "platform_dictionary.xlsx"),
+      file.path("30_global_data", "parameters", "platform_dictionary.xlsx"),
+      file.path("app_data", "parameters", "platform.xlsx"),
+      file.path("parameters", "platform_dictionary.xlsx"),
+      file.path("parameters", "platform.xlsx")
+    )
+    
+    for (path in potential_paths) {
+      if (file.exists(path)) {
+        message("Found platform dictionary at: ", path)
+        file_path <- path
+        break
+      }
+    }
+  }
+  
+  # If we still don't have a file path or it doesn't exist, return NULL
+  if (is.null(file_path) || !file.exists(file_path)) {
+    message("Platform dictionary file not found")
+    return(NULL)
+  }
+  
+  # Try to load the Excel file
+  tryCatch({
+    if (!requireNamespace("readxl", quietly = TRUE)) {
+      message("Installing readxl package...")
+      install.packages("readxl")
+    }
+    
+    platform_dict <- readxl::read_excel(file_path)
+    
+    # Check if it has the required columns
+    required_cols <- c("platform_number", "platform_name_english")
+    if (!all(required_cols %in% names(platform_dict))) {
+      message("Platform dictionary file does not contain required columns: ", 
+             paste(required_cols, collapse = ", "))
+      return(NULL)
+    }
+    
+    return(platform_dict)
+  }, error = function(e) {
+    message("Error loading platform dictionary: ", e$message)
+    return(NULL)
+  })
+}
+
+#' Initialize data availability detection
+#'
+#' @param conn A DBI connection to the app database
+#' @return TRUE if initialization was successful, FALSE otherwise
+#' @export
+initialize_data_availability <- function(conn = NULL) {
+  # If no connection provided, try to connect
+  if (is.null(conn)) {
+    conn <- connect_to_app_database()
+  }
+  
+  # Load platform dictionary
+  platform_dict <- load_platform_dictionary()
+  
+  # Detect channel availability
+  channel_availability <- detect_marketing_channel_availability(conn, platform_dict)
+  
+  # Store channel availability in a global variable
+  assign("channel_availability", channel_availability, envir = .GlobalEnv)
+  
+  # Schedule periodic refresh if shiny is available
+  if (requireNamespace("shiny", quietly = TRUE)) {
+    # Set up a global timer flag to prevent multiple timers
+    if (!exists("availability_refresh_active", envir = .GlobalEnv)) {
+      assign("availability_refresh_active", TRUE, envir = .GlobalEnv)
+      
+      # Set up automatic refresh mechanism (5 minutes)
+      shiny::observe({
+        shiny::invalidateLater(300000)
+        
+        # Refresh channel availability
+        updated_channel_availability <- detect_marketing_channel_availability(conn, platform_dict)
+        
+        # Update global variable
+        assign("channel_availability", updated_channel_availability, envir = .GlobalEnv)
+        
+        message("Channel availability refreshed")
+      })
+    }
+  }
+  
+  return(!is.null(channel_availability))
+}
+
+#' Check if data is available for a specific dimension
+#'
+#' @param domain The domain to check (e.g., "channel")
+#' @param dimension The specific dimension to check (e.g., "amazon")
+#' @return TRUE if the data is available, FALSE otherwise
+#' @export
+is_available <- function(domain, dimension = NULL) {
+  # This function now uses the global availability variables
+  # instead of a reactive registry
+  
+  if (domain == "channel") {
+    # Check if channel_availability exists
+    if (!exists("channel_availability", envir = .GlobalEnv)) {
+      return(FALSE)
+    }
+    
+    # Get channel availability from global variable
+    avail <- get("channel_availability", envir = .GlobalEnv)
+    
+    # If no specific dimension requested, check if domain has any available dimensions
+    if (is.null(dimension)) {
+      return(any(unlist(avail)))
+    }
+    
+    # Check specific dimension
+    return(!is.null(avail[[dimension]]) && avail[[dimension]])
+  }
+  
+  # For other domains, not yet implemented
+  return(FALSE)
+}
+
+#' Render an adaptive radio button control based on data availability
+#'
+#' This function implements P70 (Complete Input Display Principle) by showing
+#' all options but visually indicating and disabling those that are unavailable.
+#'
+#' @param id The input ID
+#' @param label The input label
+#' @param choices Named list of choices
+#' @param registry The availability registry
+#' @param domain The domain to check (e.g., "channel")
+#' @param session The Shiny session object (optional)
+#' @return A rendered UI element
+#' @export
+render_adaptive_radio_buttons <- function(id, label, choices, registry, domain, session = NULL) {
+  # WARNING: This function is no longer used directly - see generateSidebar.R
+  # It is kept for backward compatibility
+  
+  # Generate a warning to indicate this function is deprecated
+  warning("render_adaptive_radio_buttons is deprecated. Use direct renderUI implementation instead.")
+  
+  shiny::renderUI({
+    # Use req() to ensure registry is available and is a function
+    shiny::req(registry)
+    
+    # Note: This function will cause errors if registry is not a reactive value
+    # The direct implementation in generateSidebar.R should be used instead
+    
+    # This implementation is kept for backward compatibility only
+    shiny::div("Error: Deprecated function. Update your code to use direct renderUI implementation.")
+  })
+}

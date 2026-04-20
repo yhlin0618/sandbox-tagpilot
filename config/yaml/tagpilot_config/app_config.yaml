@@ -1,0 +1,66 @@
+# TagPilot App Configuration
+
+# Basic app information
+app_info:
+  name: "TagPilot 顧客標籤行銷引擎"  # No <br> - display in navbar
+  description: "Customer DNA analysis and marketing decision support"
+  version: "1.0"
+  language: "zh_TW.UTF-8"
+
+# UI/Theme settings
+theme:
+  version: 5
+  bootswatch: cosmo
+
+# Data settings
+data:
+  cache_dir: "./cache"
+  database_dir: "./database"
+
+# Deployment configuration
+deployment:
+  # Deployment target (shinyapps or connect)
+  target: "connect"
+
+  # GitHub repository info
+  github_repo: "kiki830621/sandbox_tagpilot"
+  app_path: "."
+  main_file: "app.R"
+  branch: "main"
+
+  # ShinyApps.io settings (if target=shinyapps)
+  shinyapps:
+    account: "your-account-name"
+    app_name: "tagpilot"
+
+  # Posit Connect Cloud vanity URL (set after deployment)
+  vanity_url: "tagpilot"
+
+# Required files to check before deployment
+required_files:
+  - "app.R"
+  - "manifest.json"
+  - ".gitignore"
+
+# Required directories
+required_dirs:
+  - "modules"
+  - "www"
+  - "scripts"
+
+# Environment variables needed (from .env)
+env_vars:
+  - "PGHOST"
+  - "PGPORT"
+  - "PGUSER"
+  - "PGPASSWORD"
+  - "PGDATABASE"
+  - "PGSSLMODE"
+  - "OPENAI_API_KEY"
+
+# Special instructions
+special_instructions: |
+  - Ensure all environment variables are set in Posit Connect Cloud
+  - The app uses PostgreSQL database, make sure connection is available
+  - Check that modules/ folder contains necessary components
+  - TagPilot uses Customer DNA analysis - ensure data is properly loaded

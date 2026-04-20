@@ -1,0 +1,35 @@
+# Portal 入口設定
+# 定義可用的 App 和 instance 數量
+
+apps:
+  brandedge:
+    name: "BrandEdge"
+    description: "Brand positioning and attribute analysis"
+    icon: "chart-line"
+    color: "primary"
+    instances: 10
+    url_pattern: "https://kyleyhl-sandbox-brandedge-%02d.share.connect.posit.cloud/"
+
+  insightforge:
+    name: "InsightForge"
+    description: "Market insights and competitive analysis"
+    icon: "lightbulb"
+    color: "success"
+    instances: 10
+    url_pattern: "https://kyleyhl-sandbox-insightforge-%02d.share.connect.posit.cloud/"
+
+  tagpilot:
+    name: "TagPilot"
+    description: "Customer segmentation and RFM analysis"
+    icon: "tags"
+    color: "warning"
+    instances: 10
+    url_pattern: "https://kyleyhl-sandbox-tagpilot-%02d.share.connect.posit.cloud/"
+
+  vitalsigns:
+    name: "VitalSigns"
+    description: "Customer health metrics and retention"
+    icon: "heartbeat"
+    color: "danger"
+    instances: 10
+    url_pattern: "https://kyleyhl-sandbox-vitalsigns-%02d.share.connect.posit.cloud/"

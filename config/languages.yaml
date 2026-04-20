@@ -1,0 +1,71 @@
+# 多語言系統配置
+# Multilingual System Configuration
+
+# 預設語言設定
+default_language: "en_US"
+
+# 支援的語言列表
+supported_languages:
+  - code: "zh_TW"
+    name: "繁體中文"
+    display_name: "繁體中文"
+    flag: ""
+    dir: "chinese"
+    locale: "zh_TW.UTF-8"
+    enabled: true
+
+  - code: "en_US"
+    name: "English (US)"
+    display_name: "English"
+    flag: ""
+    dir: "english"
+    locale: "en_US.UTF-8"
+    enabled: true
+
+  - code: "ja_JP"
+    name: "日本語"
+    display_name: "日本語"
+    flag: ""
+    dir: "japanese"
+    locale: "ja_JP.UTF-8"
+    enabled: true
+
+  - code: "ko_KR"
+    name: "한국어"
+    display_name: "한국어"
+    flag: "🇰🇷"
+    dir: "korean"
+    locale: "ko_KR.UTF-8"
+    enabled: false
+
+# 語言檢測設定
+detection:
+  # 瀏覽器語言自動檢測
+  auto_detect_browser: true
+  # Cookie 記住用戶選擇
+  remember_choice: true
+  cookie_name: "insightforge_lang"
+  cookie_duration_days: 365
+
+# 語言切換 UI 設定
+ui:
+  # 顯示語言選擇器
+  show_language_selector: true
+  # 語言選擇器位置 (topright, topleft, bottomright, bottomleft)
+  selector_position: "topright"
+  # 顯示國旗圖標
+  show_flags: false
+  # 顯示語言名稱
+  show_names: true
+  # 在登入頁面顯示語言選擇
+  show_on_login: true
+
+# 翻譯回退策略
+fallback:
+  # 當翻譯缺失時的回退語言
+  fallback_language: "zh_TW"
+  # 顯示缺失翻譯的警告
+  show_missing_warnings: false
+  # 開發模式顯示翻譯鍵值
+  show_keys_in_dev: false
+

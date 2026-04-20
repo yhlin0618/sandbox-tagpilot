@@ -1,0 +1,22 @@
+#' Data Availability Detection Module
+#'
+#' This file provides backward compatibility for the refactored data availability
+#' detection functions that now follow R21 (One Function One File) and
+#' R69 (Function File Naming).
+#'
+#' @author Claude
+#' @date 2025-04-08
+#' @implements MP45 Automatic Data Availability Detection
+#' @implements R21 One Function One File
+#' @implements R69 Function File Naming
+
+# Source the package.R file that loads all functions
+source(file.path("update_scripts", "global_scripts", "04_utils", "00_detect_data_availability", "package.R"))
+
+# Verify all functions are loaded
+check_data_availability_module()
+
+# Display message about refactoring
+message("Using refactored data availability detection functions.\n",
+        "All functions have been moved to individual files in the 00_detect_data_availability directory\n",
+        "following R21 (One Function One File) and R69 (Function File Naming) principles.")

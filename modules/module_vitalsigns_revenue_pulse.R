@@ -1,0 +1,2089 @@
+# 營收脈能模組 (Revenue Pulse Module) - VitalSigns YAML Multi-Language Framework
+# 量化收入規模、單客價值與獲利韌性
+# Adapted to VitalSigns Framework - Supports Chinese/English/Japanese via YAML
+
+library(shiny)
+library(bs4Dash)
+library(DT)
+library(plotly)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(markdown)
+
+# Helper functions
+`%+%` <- function(x, y) paste0(x, y)
+`%||%` <- function(x, y) if (is.null(x)) y else x
+
+# ============================================
+# UI Function (VitalSigns Framework Pattern)
+# ============================================
+revenuePulseVitalsignsModuleUI <- function(id, module_config = NULL, lang_texts = NULL) {
+  ns <- NS(id)
+
+  cat("🔍 [Revenue Pulse Module UI] Called with id:", id, "\n")
+  cat("  - module_config is.null:", is.null(module_config), "\n")
+  cat("  - lang_texts is.null:", is.null(lang_texts), "\n")
+  if (!is.null(lang_texts)) {
+    cat("  - lang_texts keys:", paste(names(lang_texts), collapse = ", "), "\n")
+  }
+
+  # Helper function to safely get language text - following VitalSigns framework pattern
+  get_text <- function(key, default = "") {
+    if (is.null(lang_texts)) return(default)
+
+    # Navigate through nested structure
+    parts <- strsplit(key, "\\.")[[1]]
+    value <- lang_texts
+
+    for (part in parts) {
+      if (is.list(value) && part %in% names(value)) {
+        value <- value[[part]]
+      } else {
+        return(default)
+      }
+    }
+
+    if (is.null(value)) default else as.character(value)
+  }
+
+  tagList(
+    h3(paste0("💰 ", get_text("title", "營收脈能分析"))),
+
+    p(get_text("subtitle", "量化收入規模、單客價值與獲利韌性"),
+      style = "color: #6c757d; margin-bottom: 20px;"),
+
+    fluidRow(
+      # 上方 KPI 卡片
+      column(3,
+        bs4ValueBox(
+          value = textOutput(ns("total_revenue")),
+          subtitle = tags$span(
+            get_text("metrics.total_revenue.short_name", "銷售額 (美金)"),
+            tags$i(
+              class = "fas fa-info-circle ml-1",
+              style = "font-size: 12px; color: #6c757d; cursor: help;",
+              title = get_text("hints.total_revenue", "總營收是所有客戶交易金額的總和，反映業務規模"),
+              `data-toggle` = "tooltip",
+              `data-placement` = "top"
+            )
+          ),
+          icon = icon("dollar-sign"),
+          color = "primary",
+          width = 12
+        )
+      ),
+      column(3,
+        bs4ValueBox(
+          value = textOutput(ns("arpu")),
+          subtitle = tags$span(
+            get_text("metrics.arpu.short_name", "人均購買金額 (美金)"),
+            tags$i(
+              class = "fas fa-info-circle ml-1",
+              style = "font-size: 12px; color: #6c757d; cursor: help;",
+              title = get_text("hints.arpu", "ARPU 是平均每位客戶貢獻的營收，越高代表客戶價值越高"),
+              `data-toggle` = "tooltip",
+              `data-placement` = "top"
+            )
+          ),
+          icon = icon("user-dollar"),
+          color = "success",
+          width = 12
+        )
+      ),
+      column(3,
+        bs4ValueBox(
+          value = textOutput(ns("avg_clv")),
+          subtitle = tags$span(
+            get_text("metrics.clv.short_name", "平均顧客終生價值 (美金)"),
+            tags$i(
+              class = "fas fa-info-circle ml-1",
+              style = "font-size: 12px; color: #6c757d; cursor: help;",
+              title = get_text("hints.clv", "CLV 代表客戶在生命週期內的總價值，用於評估長期投資回報"),
+              `data-toggle` = "tooltip",
+              `data-placement` = "top"
+            )
+          ),
+          icon = icon("chart-line"),
+          color = "info",
+          width = 12
+        )
+      ),
+      column(3,
+        bs4ValueBox(
+          value = textOutput(ns("transaction_consistency")),
+          subtitle = tags$span(
+            get_text("metrics.consistency_score.short_name", "交易穩定度"),
+            tags$i(
+              class = "fas fa-info-circle ml-1",
+              style = "font-size: 12px; color: #6c757d; cursor: help;",
+              title = get_text("hints.consistency", "交易穩定度反映客戶購買行為的一致性，越高越穩定"),
+              `data-toggle` = "tooltip",
+              `data-placement` = "top"
+            )
+          ),
+          icon = icon("balance-scale"),
+          color = "warning",
+          width = 12
+        )
+      )
+    ),
+
+    br(),
+
+    fluidRow(
+      # 左側：客單價分析
+      column(6,
+        bs4Card(
+          title = get_text("charts.aov_comparison.title", "客單價分析"),
+          status = "primary",
+          solidHeader = TRUE,
+          width = 12,
+          plotlyOutput(ns("aov_analysis")),
+          hr(),
+          h6(paste0("🤖 ", get_text("ui.sections.ai_insights", "AI 客群分析")),
+             style = "color: #2c3e50; font-weight: bold;"),
+          uiOutput(ns("ai_aov_insights"))
+        )
+      ),
+
+      # 右側：CLV 分布
+      column(6,
+        bs4Card(
+          title = get_text("charts.clv_distribution.title", "顧客終生價值分布 (80/20法則)"),
+          status = "info",
+          solidHeader = TRUE,
+          width = 12,
+          plotlyOutput(ns("clv_distribution")),
+          hr(),
+          h6(paste0("🤖 ", get_text("ai.insights.clv_analysis_label", "AI 價值分群建議")),
+             style = "color: #2c3e50; font-weight: bold;"),
+          uiOutput(ns("ai_clv_insights")),
+          br(),
+          downloadButton(ns("download_clv_segments"),
+                        get_text("ui.buttons.download_segments", "下載客戶名單"),
+                        class = "btn-sm btn-secondary")
+        )
+      )
+    ),
+
+    br(),
+
+    fluidRow(
+      # Pareto 80/20 累積曲線分析
+      column(12,
+        bs4Card(
+          title = get_text("chart_details.pareto_curve.title", "Pareto 80/20 累積曲線"),
+          status = "warning",
+          solidHeader = TRUE,
+          width = 12,
+          plotlyOutput(ns("pareto_curve")),
+          hr(),
+          # Dynamic interpretation box - will update with language changes
+          uiOutput(ns("pareto_interpretation"))
+        )
+      )
+    ),
+
+    br(),
+
+    # Revenue Distribution Histogram
+    fluidRow(
+      column(12,
+        bs4Card(
+          title = get_text("chart_details.revenue_distribution_chart.title", "Customer Revenue Distribution"),
+          status = "info",
+          solidHeader = TRUE,
+          width = 12,
+          collapsible = TRUE,
+          plotlyOutput(ns("revenue_distribution_chart"), height = "350px")
+        )
+      )
+    ),
+
+    br(),
+
+    # Customer Segments & ARPU Comparison
+    fluidRow(
+      # Customer Revenue Segments
+      column(6,
+        bs4Card(
+          title = get_text("chart_details.revenue_segments_pie.title", "Customer Revenue Segments"),
+          status = "warning",
+          solidHeader = TRUE,
+          width = 12,
+          collapsible = TRUE,
+
+          plotlyOutput(ns("revenue_segments_pie"), height = "350px"),
+
+          hr(),
+
+          # Segment summary table
+          uiOutput(ns("segment_summary"))
+        )
+      ),
+
+      # ARPU Analysis by Segment
+      column(6,
+        bs4Card(
+          title = get_text("chart_details.arpu_comparison_chart.title", "ARPU Analysis by Segment"),
+          status = "success",
+          solidHeader = TRUE,
+          width = 12,
+          collapsible = TRUE,
+
+          plotlyOutput(ns("arpu_comparison_chart"), height = "350px")
+        )
+      )
+    ),
+
+    br(),
+
+    # 收入成長曲線已移除 - PDF項目9：由於目前資料結構不支援時間序列分析，此功能無法正常顯示
+    # 需要交易層級資料（含 payment_time 欄位）才能繪製趨勢圖
+
+    # Top Revenue Customers
+    fluidRow(
+      column(12,
+        bs4Card(
+          title = get_text("tables.top_customers.title", "Top Revenue Customers"),
+          status = "success",
+          solidHeader = TRUE,
+          width = 12,
+          collapsible = TRUE,
+
+          DTOutput(ns("top_customers_table")),
+
+          hr(),
+
+          downloadButton(
+            ns("download_customer_revenue"),
+            get_text("ui.buttons.download_revenue_list", "Download Full Customer Revenue List"),
+            class = "btn-sm btn-secondary"
+          )
+        )
+      )
+    ),
+
+    br(),
+
+    # AI Insights Section (4-tab structure)
+    fluidRow(
+      column(12,
+        bs4Card(
+          title = tagList(icon("robot"), " ", get_text("ui.sections.ai_insights", "AI Revenue Insights")),
+          status = "primary",
+          solidHeader = TRUE,
+          width = 12,
+          collapsible = TRUE,
+
+          # Generate AI Insights Button
+          actionButton(
+            ns("generate_insights"),
+            get_text("ui.buttons.generate_insights", "Generate AI Insights"),
+            icon = icon("magic"),
+            class = "btn-primary btn-lg"
+          ),
+
+          hr(),
+
+          # AI Insights Tabs (4 types)
+          tabsetPanel(
+            id = ns("insights_tabs"),
+            type = "tabs",
+
+            # Revenue Summary
+            tabPanel(
+              get_text("insights.tabs.revenue_summary.name", "Revenue Summary"),
+              icon = icon("chart-pie"),
+              br(),
+              uiOutput(ns("ai_revenue_summary"))
+            ),
+
+            # ARPU Analysis
+            tabPanel(
+              get_text("insights.tabs.arpu_analysis.name", "ARPU Analysis"),
+              icon = icon("user-dollar"),
+              br(),
+              uiOutput(ns("ai_arpu_insights"))
+            ),
+
+            # CLV Recommendations
+            tabPanel(
+              get_text("insights.tabs.clv_recommendations.name", "CLV Optimization"),
+              icon = icon("chart-line"),
+              br(),
+              uiOutput(ns("ai_clv_recommendations"))
+            ),
+
+            # Consistency Analysis
+            tabPanel(
+              get_text("insights.tabs.consistency_analysis.name", "Consistency Analysis"),
+              icon = icon("balance-scale"),
+              br(),
+              uiOutput(ns("ai_consistency_analysis"))
+            )
+          )
+        )
+      )
+    ),
+
+    br(),
+
+    # HIDDEN: Revenue Metrics Detail Table (overlaps with Revenue Details below)
+    # fluidRow(
+    #   column(12,
+    #     bs4Card(
+    #       title = get_text("tables.revenue_metrics.title", "Revenue Metrics Detail"),
+    #       status = "secondary",
+    #       solidHeader = TRUE,
+    #       collapsible = TRUE,
+    #       collapsed = TRUE,
+    #       width = 12,
+    #
+    #       DTOutput(ns("revenue_metrics_table"))
+    #     )
+    #   )
+    # ),
+    #
+    # br(),
+
+    fluidRow(
+      # 詳細數據表
+      column(12,
+        bs4Card(
+          title = get_text("table.revenue_details.title", "營收指標明細"),
+          status = "secondary",
+          solidHeader = TRUE,
+          collapsible = TRUE,
+          width = 12,
+          div(
+            style = "margin-bottom: 10px;",
+            downloadButton(ns("download_revenue_details"),
+                          paste0("📥 ", get_text("ui.buttons.download_full_list", "下載完整客戶名單")),
+                          class = "btn-success btn-sm")
+          ),
+          DTOutput(ns("revenue_details"))
+        )
+      )
+    )
+  )
+}
+
+# ============================================
+# Server Function (VitalSigns Framework Pattern)
+# ============================================
+#' Revenue Pulse Module Server
+#' @param id Module namespace ID
+#' @param con Database connection (optional)
+#' @param user_info User information reactive (from login)
+#' @param dna_module DNA module reactive return (contains DNA results)
+#' @param module_config Module configuration from YAML (optional)
+#' @param lang_texts Language texts reactive (optional)
+#' @param chat_api Chat API function for AI insights (optional)
+#' @param api_config API configuration from app_config$api$openai (共用模型設定)
+#' @return Reactive list of module outputs
+revenuePulseVitalsignsModuleServer <- function(id, con = NULL, user_info = reactive(NULL),
+                                                dna_module = NULL,
+                                                module_config = NULL, lang_texts = NULL,
+                                                enable_hints = TRUE,
+                                                enable_gpt = FALSE,
+                                                chat_api = NULL,
+                                                api_config = NULL) {
+  moduleServer(id, function(input, output, session) {
+
+    cat("🚀 [Revenue Pulse Server] Module initialized\n")
+
+    # 從共用 API 設定讀取模型（fallback 到 gpt-5-nano）
+    cfg_ai_model <- if (!is.null(api_config$default_model)) {
+      api_config$default_model
+    } else {
+      "gpt-5-nano"
+    }
+
+    # Module config and lang_texts passed from main app (VitalSigns framework pattern)
+    if (is.null(module_config)) {
+      cat("⚠️  [Revenue Pulse] WARNING: module_config not provided, using empty config\n")
+      module_config <- list()
+    }
+
+    if (is.null(lang_texts)) {
+      cat("⚠️  [Revenue Pulse] WARNING: lang_texts not provided, using empty texts\n")
+      lang_texts <- reactive(NULL)
+    }
+
+    # Get module language texts - following VitalSigns framework pattern
+    module_texts <- reactive({
+      # If lang_texts is provided as reactive, use it
+      if (is.function(lang_texts)) {
+        texts <- lang_texts()
+        if (!is.null(texts)) {
+          cat("✅ [Revenue Pulse] Language content loaded from lang_texts parameter\n")
+          return(texts)
+        }
+      }
+
+      # Fallback to global language content
+      lang_content <- global_lang_content()
+      if (is.null(lang_content) || is.null(lang_content$content)) {
+        cat("⚠️  [Revenue Pulse] No global language content available\n")
+        return(NULL)
+      }
+
+      module_name <- "vitalsigns_revenue_pulse"
+      if (!is.null(lang_content$content[[module_name]])) {
+        cat("✅ [Revenue Pulse] Language content loaded for module:", module_name, "\n")
+        return(lang_content$content[[module_name]])
+      }
+
+      cat("⚠️  [Revenue Pulse] Module content not found:", module_name, "\n")
+      return(NULL)
+    })
+
+    # Helper function for server-side language-aware text
+    get_lang_text <- function(key, fallback = "") {
+      texts <- module_texts()
+      if (is.null(texts)) return(fallback)
+
+      keys <- strsplit(key, "\\.")[[1]]
+      value <- texts
+      for (k in keys) {
+        if (is.list(value) && !is.null(value[[k]])) {
+          value <- value[[k]]
+        } else {
+          return(fallback)
+        }
+      }
+      if (is.character(value)) return(value)
+      return(fallback)
+    }
+
+    # ==============================================================
+    # GPT 請求節流：避免同一份資料重複呼叫 API
+    # 使用資料哈希 + 分析類型 做快取鍵，成功回傳後寫入緩存
+    # (Following Retention module caching pattern)
+    # ==============================================================
+    ai_cache <- reactiveValues(data = list())
+
+    get_ai_cache_key <- function(analysis_type, metrics_data, language = "zh_TW") {
+      if (is.null(metrics_data)) return(NULL)
+
+      # 產生穩定的資料哈希
+      key_raw <- list(
+        type = analysis_type,
+        lang = language,
+        data = digest::digest(metrics_data, algo = "sha256")
+      )
+
+      # 使用 digest 產生可重現的鍵
+      digest::digest(key_raw, algo = "sha256")
+    }
+
+    get_cached_ai <- function(key) {
+      if (is.null(key)) return(NULL)
+      if (!is.null(ai_cache$data[[key]])) {
+        cached <- ai_cache$data[[key]]
+        cached$used_at <- Sys.time()
+        ai_cache$data[[key]] <- cached
+        cat("[Revenue Pulse Cache] Hit:", substr(key, 1, 8), "\n")
+        return(cached$content)
+      }
+      cat("[Revenue Pulse Cache] Miss:", substr(key, 1, 8), "\n")
+      NULL
+    }
+
+    set_cached_ai <- function(key, content) {
+      if (is.null(key) || is.null(content)) return()
+      ai_cache$data[[key]] <- list(content = content, cached_at = Sys.time(), used_at = Sys.time())
+      cat("[Revenue Pulse Cache] Stored:", substr(key, 1, 8), "\n")
+    }
+
+    # Get data from DNA module (following Engagement module pattern)
+    customer_data <- reactive({
+      req(dna_module)
+      tryCatch({
+        # Step 1: Handle different types of dna_module input
+        if (is.function(dna_module)) {
+          # dna_module is a reactive function - call it
+          result <- dna_module()
+        } else if (is.list(dna_module) && "data" %in% names(dna_module)) {
+          # dna_module is a list with a 'data' reactive - safely access and call
+          data_source <- dna_module$data
+          result <- if (is.reactive(data_source)) {
+            data_source()
+          } else if (is.function(data_source)) {
+            data_source()
+          } else {
+            data_source
+          }
+        } else {
+          # dna_module is the data itself
+          result <- dna_module
+        }
+
+        # Step 2: Extract actual customer data from result
+        if (is.list(result) && "dna_results" %in% names(result)) {
+          # Result has nested dna_results structure
+          data <- result$dna_results$data_by_customer
+        } else if (is.list(result) && "data_by_customer" %in% names(result)) {
+          # Result is the dna_results object directly
+          data <- result$data_by_customer
+        } else if (is.data.frame(result)) {
+          # Result is already a data frame
+          data <- result
+        } else {
+          cat("[Revenue Pulse Module] ERROR: Unexpected data structure from DNA module\n")
+          cat("[Revenue Pulse Module] Result class:", class(result), "\n")
+          cat("[Revenue Pulse Module] Result names:", names(result), "\n")
+          return(NULL)
+        }
+
+        # Step 3: Validate required fields for revenue analysis
+        required_fields <- c("customer_id", "total_spent", "purchase_count", "avg_order_value")
+        missing_fields <- setdiff(required_fields, names(data))
+        if (length(missing_fields) > 0) {
+          cat("[Revenue Pulse Module] WARNING: Missing required fields:", paste(missing_fields, collapse = ", "), "\n")
+          cat("[Revenue Pulse Module] Available fields:", paste(names(data), collapse = ", "), "\n")
+        }
+
+        cat("✅ [Revenue Pulse] Successfully loaded", nrow(data), "customer records\n")
+        return(data)
+
+      }, error = function(e) {
+        cat("[Revenue Pulse Module] ERROR in customer_data reactive:", e$message, "\n")
+        return(NULL)
+      })
+    })
+
+    # Extract transaction-level data for trend analysis
+    transaction_data <- reactive({
+      req(dna_module)
+
+      tryCatch({
+        # Step 1: Handle different types of dna_module input
+        if (is.function(dna_module)) {
+          result <- dna_module()
+        } else if (is.list(dna_module) && "data" %in% names(dna_module)) {
+          # Safely access and call dna_module$data
+          data_source <- dna_module$data
+          result <- if (is.reactive(data_source)) {
+            data_source()
+          } else if (is.function(data_source)) {
+            data_source()
+          } else {
+            data_source
+          }
+        } else {
+          result <- dna_module
+        }
+
+        # Step 2: Extract transaction data
+        if (is.list(result) && "transaction_data" %in% names(result)) {
+          trans_data <- result$transaction_data
+        } else if (is.list(result) && "raw_data" %in% names(result)) {
+          trans_data <- result$raw_data
+        } else if (is.list(result) && "dna_results" %in% names(result)) {
+          # Try to get from dna_results structure
+          if (!is.null(result$dna_results$raw_data)) {
+            trans_data <- result$dna_results$raw_data
+          } else {
+            return(NULL)
+          }
+        } else {
+          return(NULL)
+        }
+
+        cat("✅ [Revenue Pulse] Successfully loaded", nrow(trans_data), "transaction records\n")
+        return(trans_data)
+
+      }, error = function(e) {
+        cat("[Revenue Pulse Module] ERROR extracting transaction data:", e$message, "\n")
+        return(NULL)
+      })
+    })
+
+    # Calculate monthly revenue trends
+    revenue_trends <- reactive({
+      trans_data <- transaction_data()
+
+      if (is.null(trans_data)) {
+        cat("[Revenue Pulse] No transaction data available for trend analysis\n")
+        return(NULL)
+      }
+
+      tryCatch({
+        # Configuration
+        aggregation_period <- "monthly"  # Default to monthly
+        ma_window <- 3  # 3-month moving average
+
+        # Check if payment_time exists
+        if (!"payment_time" %in% names(trans_data)) {
+          cat("[Revenue Pulse] No payment_time field in transaction data\n")
+          return(NULL)
+        }
+
+        # Ensure payment_time is Date
+        trans_data <- trans_data %>%
+          mutate(
+            payment_date = as.Date(payment_time),
+            period = floor_date(payment_date, unit = "month")
+          )
+
+        # Calculate monthly revenue
+        monthly_revenue <- trans_data %>%
+          group_by(period) %>%
+          summarise(
+            revenue = sum(lineitem_price, na.rm = TRUE),
+            transactions = n(),
+            unique_customers = n_distinct(customer_id),
+            .groups = "drop"
+          ) %>%
+          arrange(period) %>%
+          mutate(
+            # Month-over-Month growth rate
+            revenue_growth_pct = (revenue / lag(revenue) - 1) * 100,
+            # Moving average (requires zoo package)
+            ma_revenue = if (requireNamespace("zoo", quietly = TRUE)) {
+              zoo::rollmean(revenue, k = ma_window, fill = NA, align = "right")
+            } else {
+              NA_real_
+            }
+          )
+
+        cat("✅ [Revenue Pulse] Revenue trends calculated:", nrow(monthly_revenue), "periods\n")
+        return(monthly_revenue)
+
+      }, error = function(e) {
+        cat("[Revenue Pulse] ERROR calculating revenue trends:", e$message, "\n")
+        return(NULL)
+      })
+    })
+
+    # 計算營收指標
+    revenue_metrics <- reactive({
+      req(customer_data())
+
+      data <- customer_data()
+      cat("📊 [Revenue Pulse] Calculating metrics for", nrow(data), "customers\n")
+
+      # Total transactions
+      total_transactions <- sum(data$times, na.rm = TRUE)
+
+      # AOV calculation
+      total_revenue <- sum(data$total_spent, na.rm = TRUE)
+      aov <- if (total_transactions > 0) {
+        total_revenue / total_transactions
+      } else {
+        0
+      }
+
+      # Consistency score calculation
+      customer_revenues <- data$total_spent[!is.na(data$total_spent)]
+      if (length(customer_revenues) > 1) {
+        revenue_mean <- mean(customer_revenues)
+        revenue_sd <- sd(customer_revenues)
+        cv_coefficient <- if (revenue_mean > 0) revenue_sd / revenue_mean else 0
+        consistency_score <- max(0, (1 - cv_coefficient) * 100)
+      } else {
+        cv_coefficient <- 0
+        consistency_score <- 100
+      }
+
+      # 基本指標計算
+      metrics <- list(
+        total_revenue = total_revenue,
+        customer_count = nrow(data),
+        arpu = mean(data$total_spent, na.rm = TRUE),
+        avg_clv = mean(data$clv, na.rm = TRUE),
+        aov = aov,
+        total_transactions = total_transactions,
+        consistency_score = consistency_score,
+        cv_coefficient = cv_coefficient,
+
+        # 新客單價 (新客 N 或僅購買一次的客戶)
+        new_customer_aov = {
+          # 優先使用 nes_status == "N" 的客戶
+          new_by_nes <- data %>% filter(nes_status == "N")
+          if (nrow(new_by_nes) > 0) {
+            mean(new_by_nes$m_value, na.rm = TRUE)
+          } else {
+            # Fallback: 使用 times == 1 (僅購買一次) 的客戶
+            new_by_times <- data %>% filter(times == 1)
+            if (nrow(new_by_times) > 0) {
+              mean(new_by_times$m_value, na.rm = TRUE)
+            } else {
+              NA_real_
+            }
+          }
+        },
+
+        # 主力客單價 (E0)
+        core_customer_aov = data %>%
+          filter(nes_status == "E0") %>%
+          summarise(aov = mean(m_value, na.rm = TRUE)) %>%
+          pull(aov),
+
+        # 交易穩定度 (使用 CRI - Customer Regularity Index)
+        transaction_consistency = mean(data$cri, na.rm = TRUE)
+      )
+
+      return(metrics)
+    })
+
+    # ============================================
+    # Pareto Analysis (80/20 Rule)
+    # ============================================
+    pareto_analysis <- reactive({
+      req(customer_data())
+
+      data <- customer_data()
+
+      tryCatch({
+        # Configuration
+        pareto_threshold <- module_config$pareto_analysis$dimensions[[1]]$threshold %||% 0.8
+        top_n <- module_config$pareto_analysis$dimensions[[1]]$top_n %||% 20
+
+        # Calculate cumulative revenue by customer
+        pareto_data <- data %>%
+          filter(!is.na(total_spent)) %>%
+          arrange(desc(total_spent)) %>%
+          mutate(
+            customer_rank = row_number(),
+            cumulative_revenue = cumsum(total_spent),
+            total_revenue = sum(total_spent),
+            cumulative_pct = cumulative_revenue / total_revenue,
+            customer_pct = customer_rank / n(),
+            # Segment customers into 3 groups
+            segment = case_when(
+              cumulative_pct <= pareto_threshold ~ get_lang_text("segment_labels.high_value", "High Value (Top 20%)"),
+              cumulative_pct <= 0.95 ~ get_lang_text("segment_labels.mid_value", "Mid Value (Middle 60%)"),
+              TRUE ~ get_lang_text("segment_labels.low_value", "Low Value (Bottom 20%)")
+            )
+          )
+
+        # Find exact 80% point
+        pareto_80_point <- pareto_data %>%
+          filter(cumulative_pct >= pareto_threshold) %>%
+          slice(1)
+
+        # Segment statistics
+        segment_stats <- pareto_data %>%
+          group_by(segment) %>%
+          summarise(
+            customer_count = n(),
+            total_revenue = sum(total_spent),
+            avg_revenue = mean(total_spent),
+            min_revenue = min(total_spent),
+            max_revenue = max(total_spent),
+            .groups = "drop"
+          ) %>%
+          mutate(
+            customer_pct = customer_count / sum(customer_count) * 100,
+            revenue_pct = total_revenue / sum(total_revenue) * 100
+          )
+
+        cat("[Revenue Pulse] Pareto Analysis:",
+            round(pareto_80_point$customer_pct[1] * 100, 1), "% of customers contribute",
+            round(pareto_threshold * 100, 0), "% of revenue\n")
+
+        return(list(
+          pareto_data = pareto_data,
+          pareto_80_point = pareto_80_point,
+          segment_stats = segment_stats
+        ))
+
+      }, error = function(e) {
+        cat("[Revenue Pulse] ERROR in Pareto analysis:", e$message, "\n")
+        return(NULL)
+      })
+    })
+
+    # 如果 revenue_metrics 或 pareto_analysis 結果更新則清除 AI 快取
+    observeEvent(list(revenue_metrics(), pareto_analysis()), {
+      ai_cache$data <- list()
+      cat("🧹 [Revenue Pulse] Metrics changed -> AI cache cleared\n")
+    })
+
+    # KPI 顯示
+    output$total_revenue <- renderText({
+      metrics <- revenue_metrics()
+      paste0("$", format(round(metrics$total_revenue, 0), big.mark = ","))
+    })
+
+    output$arpu <- renderText({
+      metrics <- revenue_metrics()
+      paste0("$", format(round(metrics$arpu, 2), big.mark = ","))
+    })
+
+    output$avg_clv <- renderText({
+      metrics <- revenue_metrics()
+      paste0("$", format(round(metrics$avg_clv, 2), big.mark = ","))
+    })
+
+    output$transaction_consistency <- renderText({
+      metrics <- revenue_metrics()
+      if (is.na(metrics$transaction_consistency)) {
+        "N/A"
+      } else {
+        paste0(round(metrics$transaction_consistency * 100, 1), "%")
+      }
+    })
+
+    # 客單價分析圖表
+    output$aov_analysis <- renderPlotly({
+      req(customer_data())
+      data <- customer_data()
+      metrics <- revenue_metrics()
+
+      # 準備數據
+      aov_data <- data.frame(
+        Category = c(
+          get_lang_text("charts.aov_comparison.categories.overall", "全體平均"),
+          get_lang_text("charts.aov_comparison.categories.new", "新客"),
+          get_lang_text("charts.aov_comparison.categories.core", "主力客")
+        ),
+        AOV = c(
+          metrics$arpu,
+          metrics$new_customer_aov,
+          metrics$core_customer_aov
+        )
+      )
+
+      # 過濾掉 NA 值
+      aov_data <- aov_data[!is.na(aov_data$AOV), ]
+
+      plot_ly(aov_data,
+              x = ~Category,
+              y = ~AOV,
+              type = 'bar',
+              marker = list(color = c('#3498db', '#2ecc71', '#f39c12')),
+              text = ~paste0("$", format(round(AOV, 2), big.mark = ",")),
+              textposition = "outside",
+              hovertemplate = paste0("%{x}<br>",
+                                   get_lang_text("charts.aov_comparison.hover_label", "平均客單價"),
+                                   ": $%{y:,.2f}<extra></extra>")) %>%
+        layout(
+          title = list(text = get_lang_text("charts.aov_comparison.subtitle", "不同客群平均客單價比較"),
+                      font = list(size = 16)),
+          xaxis = list(title = get_lang_text("charts.aov_comparison.x_axis", "客戶類型")),
+          yaxis = list(title = get_lang_text("charts.aov_comparison.y_axis", "平均客單價 ($)"),
+                      tickformat = ",.0f"),
+          showlegend = FALSE
+        )
+    })
+
+    # CLV 分布圖 (散點圖)
+    output$clv_distribution <- renderPlotly({
+      req(customer_data())
+      data <- customer_data()
+
+      # 取得語言文本
+      label_high <- get_lang_text("charts.clv_distribution.segments.high", "高價值客戶")
+      label_mid <- get_lang_text("charts.clv_distribution.segments.mid", "中價值客戶")
+      label_low <- get_lang_text("charts.clv_distribution.segments.low", "低價值客戶")
+
+      # CLV 分組 (80/20法則 - 三群)
+      clv_groups <- data %>%
+        filter(!is.na(clv)) %>%
+        arrange(desc(clv)) %>%
+        mutate(
+          cum_revenue = cumsum(clv),
+          total_revenue = sum(clv),
+          revenue_pct = cum_revenue / total_revenue,
+          clv_group = case_when(
+            revenue_pct <= 0.8 ~ label_high,
+            revenue_pct <= 0.95 ~ label_mid,
+            TRUE ~ label_low
+          ),
+          # 為散點圖加入位置變數
+          x_position = case_when(
+            clv_group == label_low ~ 1,
+            clv_group == label_mid ~ 2,
+            TRUE ~ 3
+          )
+        )
+
+      # 計算每組統計
+      clv_summary <- clv_groups %>%
+        group_by(clv_group) %>%
+        summarise(
+          count = n(),
+          avg_clv = mean(clv),
+          median_clv = median(clv),
+          min_clv = min(clv),
+          max_clv = max(clv),
+          q1_clv = quantile(clv, 0.25),
+          q3_clv = quantile(clv, 0.75),
+          .groups = "drop"
+        ) %>%
+        mutate(
+          x_position = case_when(
+            clv_group == label_low ~ 1,
+            clv_group == label_mid ~ 2,
+            TRUE ~ 3
+          )
+        )
+
+      # 為每個客戶群加入一些隨機抖動（jitter）
+      clv_groups <- clv_groups %>%
+        mutate(
+          x_jittered = x_position + runif(n(), -0.3, 0.3)
+        )
+
+      # 建立散點圖
+      plot_ly() %>%
+        # 加入散點（每個客戶）
+        add_trace(
+          data = clv_groups,
+          x = ~x_jittered,
+          y = ~clv,
+          type = 'scatter',
+          mode = 'markers',
+          marker = list(
+            size = 4,
+            opacity = 0.4,
+            color = ~x_position,
+            colorscale = list(
+              c(0, "#e74c3c"),
+              c(0.5, "#f39c12"),
+              c(1, "#27ae60")
+            ),
+            showscale = FALSE
+          ),
+          hovertemplate = paste0(get_lang_text("table.revenue_details.columns.customer_id", "客戶ID"),
+                               ": %{text}<br>CLV: $%{y:,.0f}<extra></extra>"),
+          text = ~customer_id,
+          showlegend = FALSE
+        ) %>%
+        # 加入中位數標記（只有標記，沒有連接線）
+        add_trace(
+          data = clv_summary,
+          x = ~x_position,
+          y = ~median_clv,
+          type = 'scatter',
+          mode = 'markers',
+          name = get_lang_text("charts.clv_distribution.legend.median", "中位數"),
+          marker = list(size = 12, color = '#2c3e50', symbol = 'square'),
+          hovertemplate = paste0("%{x}<br>",
+                               get_lang_text("charts.clv_distribution.legend.median", "中位數"),
+                               ": $%{y:,.0f}<extra></extra>")
+        ) %>%
+        # 加入平均值線
+        add_trace(
+          data = clv_summary,
+          x = ~x_position,
+          y = ~avg_clv,
+          type = 'scatter',
+          mode = 'markers',
+          name = get_lang_text("charts.clv_distribution.legend.mean", "平均值"),
+          marker = list(
+            size = 10,
+            color = '#e74c3c',
+            symbol = 'diamond'
+          ),
+          hovertemplate = paste0("%{x}<br>",
+                               get_lang_text("charts.clv_distribution.legend.mean", "平均值"),
+                               ": $%{y:,.0f}<extra></extra>")
+        ) %>%
+        # 加入四分位範圍（透明矩形）
+        add_trace(
+          data = clv_summary,
+          x = ~x_position,
+          y = ~q1_clv,
+          type = 'scatter',
+          mode = 'lines',
+          line = list(color = 'transparent'),
+          showlegend = FALSE,
+          hoverinfo = 'skip'
+        ) %>%
+        add_trace(
+          data = clv_summary,
+          x = ~x_position,
+          y = ~q3_clv,
+          type = 'scatter',
+          mode = 'lines',
+          fill = 'tonexty',
+          fillcolor = 'rgba(44, 62, 80, 0.1)',
+          line = list(color = 'transparent'),
+          showlegend = FALSE,
+          hoverinfo = 'skip'
+        ) %>%
+        layout(
+          title = list(text = get_lang_text("charts.clv_distribution.subtitle", "CLV 分布 (80/20法則)"),
+                      font = list(size = 16)),
+          xaxis = list(
+            title = get_lang_text("charts.clv_distribution.x_axis", "客戶分群"),
+            tickmode = "array",
+            tickvals = c(1, 2, 3),
+            ticktext = c(
+              get_lang_text("charts.clv_distribution.x_labels.low", "低價值\n(Bottom 20%)"),
+              get_lang_text("charts.clv_distribution.x_labels.mid", "中價值\n(Middle 60%)"),
+              get_lang_text("charts.clv_distribution.x_labels.high", "高價值\n(Top 20%)")
+            )
+          ),
+          yaxis = list(
+            title = get_lang_text("charts.clv_distribution.y_axis", "顧客終生價值 ($)"),
+            tickformat = ",.0f"
+          ),
+          legend = list(x = 0.8, y = 0.95),
+          annotations = list(
+            list(
+              x = 0.5,
+              y = 1.1,
+              xref = "paper",
+              yref = "paper",
+              text = get_lang_text("charts.clv_distribution.annotations.note",
+                                  "📊 Top 20% contribute 80% revenue | 🔶 Median | 🔹 Mean | Gray area: IQR (Q1-Q3)"),
+              showarrow = FALSE,
+              font = list(size = 11, color = "#7f8c8d")
+            )
+          )
+        )
+    })
+
+    # Pareto 80/20 累積曲線圖
+    output$pareto_curve <- renderPlotly({
+      req(customer_data())
+      data <- customer_data()
+
+      # 計算 Pareto 分析數據
+      pareto_data <- data %>%
+        filter(!is.na(total_spent)) %>%
+        arrange(desc(total_spent)) %>%
+        mutate(
+          customer_rank = row_number(),
+          cumulative_revenue = cumsum(total_spent),
+          total_revenue = sum(total_spent),
+          cumulative_pct = cumulative_revenue / total_revenue * 100,
+          customer_pct = customer_rank / n() * 100
+        )
+
+      # 找出 80% 點
+      pareto_80_point <- pareto_data %>%
+        filter(cumulative_pct >= 80) %>%
+        slice(1)
+
+      # 創建雙軸 Pareto 圖
+      plot_ly(pareto_data) %>%
+        # 柱狀圖：個人營收
+        add_trace(
+          x = ~customer_rank,
+          y = ~total_spent,
+          type = "bar",
+          name = get_lang_text("chart_details.pareto_curve.legend.individual_revenue", "個人營收"),
+          marker = list(color = "#3498db"),
+          yaxis = "y",
+          hovertemplate = paste0(
+            get_lang_text("chart_details.pareto_curve.hover.customer_rank", "客戶排名"),
+            ": %{x}<br>",
+            get_lang_text("chart_details.pareto_curve.hover.revenue", "營收"),
+            ": $%{y:,.0f}<extra></extra>"
+          )
+        ) %>%
+        # 曲線圖：累積百分比
+        add_trace(
+          x = ~customer_rank,
+          y = ~cumulative_pct,
+          type = "scatter",
+          mode = "lines",
+          name = get_lang_text("chart_details.pareto_curve.legend.cumulative_pct", "累積營收%"),
+          line = list(color = "#e74c3c", width = 3),
+          yaxis = "y2",
+          hovertemplate = paste0(
+            get_lang_text("chart_details.pareto_curve.hover.cumulative", "累積營收"),
+            ": %{y:.1f}%<extra></extra>"
+          )
+        ) %>%
+        # 80% 基準線
+        add_trace(
+          x = c(0, nrow(pareto_data)),
+          y = c(80, 80),
+          type = "scatter",
+          mode = "lines",
+          name = get_lang_text("chart_details.pareto_curve.legend.target_80", "80% 目標線"),
+          line = list(color = "#95a5a6", width = 2, dash = "dash"),
+          yaxis = "y2",
+          hoverinfo = "skip",
+          showlegend = TRUE
+        ) %>%
+        # 標記 80% 點
+        add_annotations(
+          x = pareto_80_point$customer_rank[1],
+          y = 80,
+          text = paste0(
+            get_lang_text("chart_details.pareto_curve.annotation.pareto_point", "Pareto點: "),
+            round(pareto_80_point$customer_pct[1], 1), "% ",
+            get_lang_text("chart_details.pareto_curve.annotation.customers", "的客戶")
+          ),
+          showarrow = TRUE,
+          arrowhead = 2,
+          arrowsize = 1,
+          arrowwidth = 2,
+          arrowcolor = "#e74c3c",
+          ax = 40,
+          ay = -40,
+          font = list(size = 12, color = "#2c3e50", family = "Arial"),
+          bgcolor = "#ffffff",
+          bordercolor = "#e74c3c",
+          borderwidth = 2
+        ) %>%
+        layout(
+          title = list(
+            text = get_lang_text("chart_details.pareto_curve.title", "Pareto 80/20 累積曲線"),
+            font = list(size = 16)
+          ),
+          xaxis = list(
+            title = get_lang_text("chart_details.pareto_curve.x_axis", "客戶排名（按營收降序）")
+          ),
+          yaxis = list(
+            title = get_lang_text("chart_details.pareto_curve.y_axis_left", "個人營收 ($)"),
+            side = "left",
+            tickformat = ",.0f"
+          ),
+          yaxis2 = list(
+            title = get_lang_text("chart_details.pareto_curve.y_axis_right", "累積營收佔比 (%)"),
+            overlaying = "y",
+            side = "right",
+            range = c(0, 100)
+          ),
+          legend = list(x = 0.65, y = 0.15, bgcolor = "rgba(255,255,255,0.8)"),
+          hovermode = "x unified"
+        )
+    })
+
+    # Pareto interpretation box (dynamic - updates with language changes)
+    output$pareto_interpretation <- renderUI({
+      tagList(
+        h6(paste0("📊 ", get_lang_text("chart_details.pareto_curve.interpretation_title", "圖表說明")),
+           style = "color: #2c3e50; font-weight: bold;"),
+        p(get_lang_text("chart_details.pareto_curve.interpretation", "圖表說明內容"),
+          style = "color: #6c757d; margin-top: 10px;")
+      )
+    })
+
+    # ========== NEW FEATURES FROM BACKUP ==========
+
+    # 1. Revenue Distribution Histogram
+    output$revenue_distribution_chart <- renderPlotly({
+      req(customer_data())
+      data <- customer_data()
+
+      # Configuration
+      bins <- module_config$revenue_analysis$distribution$bins %||% 30
+      color <- module_config$visualization$charts$revenue_distribution$color %||% "#28a745"
+
+      tryCatch({
+        plot_ly(
+          x = data$total_spent,
+          type = "histogram",
+          nbinsx = bins,
+          marker = list(
+            color = color,
+            line = list(color = "#ffffff", width = 1)
+          ),
+          hovertemplate = get_lang_text("chart_details.revenue_distribution_chart.hover_template", "Revenue Range: $%{x}<br>Customer Count: %{y}<extra></extra>")
+        ) %>%
+          layout(
+            title = list(text = get_lang_text("chart_details.revenue_distribution_chart.title", "Customer Revenue Distribution"), font = list(size = 14)),
+            xaxis = list(title = get_lang_text("chart_details.revenue_distribution_chart.x_axis", "Customer Revenue ($)"), tickformat = ",.0f"),
+            yaxis = list(title = get_lang_text("chart_details.revenue_distribution_chart.y_axis", "Number of Customers")),
+            showlegend = FALSE,
+            hovermode = "closest"
+          )
+      }, error = function(e) {
+        plotly_empty() %>%
+          layout(title = get_lang_text("chart_details.revenue_distribution_chart.no_chart_message", "Unable to generate chart"))
+      })
+    })
+
+    # 2. Revenue Segments Pie Chart
+    output$revenue_segments_pie <- renderPlotly({
+      req(pareto_analysis())
+      pareto <- pareto_analysis()
+
+      tryCatch({
+        segment_stats <- pareto$segment_stats
+
+        plot_ly(
+          segment_stats,
+          labels = ~segment,
+          values = ~revenue_pct,
+          type = "pie",
+          textposition = "inside",
+          textinfo = "label+percent",
+          marker = list(
+            colors = c("#28a745", "#ffc107", "#dc3545"),
+            line = list(color = "#ffffff", width = 2)
+          ),
+          hovertemplate = paste0(get_lang_text("chart_details.revenue_segments_pie.hover_template", "%{label}<br>Revenue Share: %{value:.1f}%<br>Customers: %{customdata}"), "<extra></extra>"),
+          customdata = ~customer_count
+        ) %>%
+          layout(
+            title = list(text = get_lang_text("chart_details.revenue_segments_pie.title", "Customer Revenue Segment Contribution"), font = list(size = 14)),
+            showlegend = TRUE,
+            legend = list(orientation = "h", y = -0.1)
+          )
+      }, error = function(e) {
+        plotly_empty() %>%
+          layout(title = get_lang_text("chart_details.revenue_segments_pie.no_chart_message", "Unable to generate chart"))
+      })
+    })
+
+    # 3. Segment Summary Table
+    output$segment_summary <- renderUI({
+      req(pareto_analysis())
+      segment_stats <- pareto_analysis()$segment_stats
+
+      div(
+        style = "padding: 10px;",
+        h6(get_lang_text("tables.segment_summary.title", "Segment Detailed Statistics"), style = "font-weight: bold; margin-bottom: 10px;"),
+        tags$table(
+          class = "table table-sm table-striped",
+          style = "font-size: 13px;",
+          tags$thead(
+            tags$tr(
+              tags$th(get_lang_text("tables.segment_summary.columns.segment", "Segment")),
+              tags$th(get_lang_text("tables.segment_summary.columns.customer_count", "Customer Count")),
+              tags$th(get_lang_text("tables.segment_summary.columns.revenue_pct", "Revenue %")),
+              tags$th(get_lang_text("tables.segment_summary.columns.avg_revenue", "Avg Revenue"))
+            )
+          ),
+          tags$tbody(
+            lapply(1:nrow(segment_stats), function(i) {
+              row <- segment_stats[i, ]
+              tags$tr(
+                tags$td(row$segment),
+                tags$td(format(row$customer_count, big.mark = ",")),
+                tags$td(paste0(round(row$revenue_pct, 1), "%")),
+                tags$td(paste0("$", format(round(row$avg_revenue, 0), big.mark = ",")))
+              )
+            })
+          )
+        )
+      )
+    })
+
+    # 4. ARPU Comparison by Segment
+    output$arpu_comparison_chart <- renderPlotly({
+      req(pareto_analysis())
+      segment_stats <- pareto_analysis()$segment_stats
+
+      tryCatch({
+        plot_ly(
+          segment_stats,
+          x = ~segment,
+          y = ~avg_revenue,
+          type = "bar",
+          marker = list(
+            color = c("#28a745", "#ffc107", "#dc3545"),
+            line = list(color = "#ffffff", width = 1)
+          ),
+          text = ~paste0("$", format(round(avg_revenue, 0), big.mark = ",")),
+          textposition = "outside",
+          hovertemplate = paste0(get_lang_text("chart_details.arpu_comparison_chart.hover_template", "%{x}<br>Avg Revenue: $%{y:,.0f}"), "<extra></extra>")
+        ) %>%
+          layout(
+            title = list(text = get_lang_text("chart_details.arpu_comparison_chart.title", "Average Revenue by Segment"), font = list(size = 14)),
+            xaxis = list(title = get_lang_text("chart_details.arpu_comparison_chart.x_axis", "")),
+            yaxis = list(title = get_lang_text("chart_details.arpu_comparison_chart.y_axis", "Avg Revenue ($)"), tickformat = ",.0f"),
+            showlegend = FALSE
+          )
+      }, error = function(e) {
+        plotly_empty() %>%
+          layout(title = get_lang_text("chart_details.arpu_comparison_chart.no_chart_message", "Unable to generate chart"))
+      })
+    })
+
+    # 5. Top Customers Table
+    output$top_customers_table <- renderDT({
+      req(customer_data())
+      data <- customer_data()
+
+      # Top N customers
+      top_n <- module_config$pareto_analysis$dimensions[[1]]$top_n %||% 20
+
+      top_customers <- data %>%
+        arrange(desc(total_spent)) %>%
+        head(top_n) %>%
+        select(customer_id, total_spent, times, m_value) %>%
+        rename(
+          !!get_lang_text("tables.top_customers.columns.customer_id", "Customer ID") := customer_id,
+          !!get_lang_text("tables.top_customers.columns.total_revenue", "Total Revenue") := total_spent,
+          !!get_lang_text("tables.top_customers.columns.purchase_count", "Purchase Count") := times,
+          !!get_lang_text("tables.top_customers.columns.avg_transaction", "Avg Transaction") := m_value
+        )
+
+      datatable(
+        top_customers,
+        options = list(
+          pageLength = 10,
+          scrollX = TRUE,
+          dom = "frtip",
+          ordering = FALSE,
+          searching = FALSE,
+          columnDefs = list(
+            list(className = "dt-right", targets = c(1, 2, 3))
+          )
+        ),
+        rownames = FALSE
+      ) %>%
+        formatCurrency(
+          c(
+            get_lang_text("tables.top_customers.columns.total_revenue", "Total Revenue"),
+            get_lang_text("tables.top_customers.columns.avg_transaction", "Avg Transaction")
+          ),
+          "$",
+          digits = 0
+        )
+    })
+
+    # HIDDEN: 6. Revenue Metrics Detail Table (overlaps with revenue_details table)
+    # output$revenue_metrics_table <- renderDT({
+    #   req(customer_data())
+    #   data <- customer_data()
+    #
+    #   # Prepare comprehensive metrics table
+    #   metrics_table <- data %>%
+    #     select(customer_id, total_spent, times, m_value, r_value, f_value) %>%
+    #     mutate(
+    #       aov = total_spent / times,
+    #       clv = total_spent  # Historical CLV
+    #     ) %>%
+    #     rename(
+    #       !!get_lang_text("tables.revenue_metrics.columns.customer_id", "Customer ID") := customer_id,
+    #       !!get_lang_text("tables.revenue_metrics.columns.total_revenue", "Total Revenue") := total_spent,
+    #       !!get_lang_text("tables.revenue_metrics.columns.purchase_count", "Purchase Count") := times,
+    #       !!get_lang_text("tables.revenue_metrics.columns.avg_transaction", "Avg Transaction") := m_value,
+    #       !!get_lang_text("tables.revenue_metrics.columns.days_since_last", "Days Since Last") := r_value,
+    #       !!get_lang_text("tables.revenue_metrics.columns.purchase_frequency", "Purchase Frequency") := f_value,
+    #       !!get_lang_text("tables.revenue_metrics.columns.aov", "AOV") := aov,
+    #       !!get_lang_text("tables.revenue_metrics.columns.clv", "CLV") := clv
+    #     ) %>%
+    #     arrange(desc(!!sym(get_lang_text("tables.revenue_metrics.columns.total_revenue", "Total Revenue"))))
+    #
+    #   datatable(
+    #     metrics_table,
+    #     options = list(
+    #       pageLength = 15,
+    #       scrollX = TRUE,
+    #       dom = "frtip",
+    #       order = list(list(1, "desc")),
+    #       columnDefs = list(
+    #         list(className = "dt-right", targets = c(1, 2, 3, 4, 5, 6, 7))
+    #       )
+    #     ),
+    #     rownames = FALSE
+    #   ) %>%
+    #     formatCurrency(
+    #       c(
+    #         get_lang_text("tables.revenue_metrics.columns.total_revenue", "Total Revenue"),
+    #         get_lang_text("tables.revenue_metrics.columns.avg_transaction", "Avg Transaction"),
+    #         get_lang_text("tables.revenue_metrics.columns.aov", "AOV"),
+    #         get_lang_text("tables.revenue_metrics.columns.clv", "CLV")
+    #       ),
+    #       "$",
+    #       digits = 2
+    #     )
+    # })
+
+    # 7. Download Handler for Customer Revenue
+    output$download_customer_revenue <- downloadHandler(
+      filename = function() {
+        template <- get_lang_text("downloads.customer_revenue.filename", "customer_revenue_{date}.csv")
+        gsub("\\{date\\}", format(Sys.Date(), "%Y%m%d"), template)
+      },
+      content = function(file) {
+        req(customer_data())
+        data <- customer_data() %>%
+          select(customer_id, total_spent, times, m_value, clv, nes_status) %>%
+          rename(
+            !!get_lang_text("tables.top_customers.columns.customer_id", "Customer ID") := customer_id,
+            !!get_lang_text("tables.top_customers.columns.total_revenue", "Total Revenue") := total_spent,
+            !!get_lang_text("tables.top_customers.columns.purchase_count", "Purchase Count") := times,
+            !!get_lang_text("tables.top_customers.columns.avg_transaction", "Avg Transaction") := m_value,
+            !!get_lang_text("tables.revenue_metrics.columns.clv", "CLV") := clv,
+            !!get_lang_text("table.revenue_details.columns.status", "Status") := nes_status
+          )
+        write.csv(data, file, row.names = FALSE, fileEncoding = "UTF-8")
+      }
+    )
+
+    # ========== END NEW FEATURES ==========
+
+    # Revenue Trend Over Time
+    output$revenue_trend <- renderPlotly({
+      trends <- revenue_trends()
+
+      if (is.null(trends) || nrow(trends) == 0) {
+        return(
+          plotly_empty() %>%
+            layout(
+              title = get_lang_text("chart_details.revenue_trend_chart.no_data_title", "時間序列數據不足"),
+              annotations = list(
+                text = get_lang_text("chart_details.revenue_trend_chart.no_data_message", "需要更多交易記錄以進行趨勢分析"),
+                x = 0.5, y = 0.5,
+                xref = "paper", yref = "paper",
+                showarrow = FALSE,
+                font = list(size = 14, color = "#999")
+              )
+            )
+        )
+      }
+
+      tryCatch({
+        # Configuration
+        show_ma <- module_config$revenue_analysis$trend$show_moving_average %||% TRUE
+        color <- module_config$visualization$charts$revenue_over_time$color %||% "#007bff"
+
+        p <- plot_ly(trends, x = ~period)
+
+        # Add revenue line
+        p <- p %>%
+          add_trace(
+            y = ~revenue,
+            type = "scatter",
+            mode = "lines+markers",
+            name = get_lang_text("chart_details.revenue_trend_chart.legend.revenue", "月度營收"),
+            line = list(color = color, width = 3),
+            marker = list(size = 8),
+            hovertemplate = paste0(get_lang_text("chart_details.revenue_trend_chart.hover_revenue", "%{x|%Y-%m}<br>營收: $%{y:,.0f}"), "<extra></extra>")
+          )
+
+        # Add moving average if enabled
+        if (show_ma && any(!is.na(trends$ma_revenue))) {
+          p <- p %>%
+            add_trace(
+              y = ~ma_revenue,
+              type = "scatter",
+              mode = "lines",
+              name = get_lang_text("chart_details.revenue_trend_chart.legend.moving_avg", "移動平均"),
+              line = list(color = "#6c757d", width = 2, dash = "dash"),
+              hovertemplate = paste0(get_lang_text("chart_details.revenue_trend_chart.hover_ma", "%{x|%Y-%m}<br>MA: $%{y:,.0f}"), "<extra></extra>")
+            )
+        }
+
+        # Add growth rate bars
+        p <- p %>%
+          add_trace(
+            y = ~revenue_growth_pct,
+            type = "bar",
+            name = get_lang_text("chart_details.revenue_trend_chart.legend.growth", "成長率 (%)"),
+            yaxis = "y2",
+            marker = list(
+              color = ~ifelse(revenue_growth_pct >= 0, "#28a745", "#dc3545")
+            ),
+            hovertemplate = paste0(get_lang_text("chart_details.revenue_trend_chart.hover_growth", "%{x|%Y-%m}<br>成長率: %{y:.1f}%"), "<extra></extra>")
+          )
+
+        p %>%
+          layout(
+            title = list(text = get_lang_text("chart_details.revenue_trend_chart.title", "月度營收趨勢與成長率"), font = list(size = 14)),
+            xaxis = list(
+              title = get_lang_text("chart_details.revenue_trend_chart.x_axis", "月份"),
+              type = "date",
+              tickformat = "%Y-%m"
+            ),
+            yaxis = list(
+              title = get_lang_text("chart_details.revenue_trend_chart.y_axis_left", "營收 ($)"),
+              side = "left",
+              tickformat = ",.0f"
+            ),
+            yaxis2 = list(
+              title = get_lang_text("chart_details.revenue_trend_chart.y_axis_right", "成長率 (%)"),
+              overlaying = "y",
+              side = "right"
+            ),
+            legend = list(x = 0.1, y = 0.95),
+            hovermode = "x unified"
+          )
+
+      }, error = function(e) {
+        plotly_empty() %>%
+          layout(title = get_lang_text("chart_details.revenue_trend_chart.no_chart_message", "無法生成圖表"))
+      })
+    })
+
+    # 詳細數據表
+    output$revenue_details <- renderDT({
+      req(customer_data())
+      data <- customer_data()
+
+      # 準備顯示數據
+      display_data <- data %>%
+        select(
+          customer_id,
+          total_spent,
+          m_value,
+          clv,
+          nes_status,
+          times,
+          r_value,
+          f_value
+        ) %>%
+        rename(
+          !!get_lang_text("table.revenue_details.columns.customer_id", "客戶ID") := customer_id,
+          !!get_lang_text("table.revenue_details.columns.total_spent", "總消費金額") := total_spent,
+          !!get_lang_text("table.revenue_details.columns.avg_spent", "平均單次消費") := m_value,
+          !!get_lang_text("table.revenue_details.columns.clv", "顧客終生價值") := clv,
+          !!get_lang_text("table.revenue_details.columns.status", "客戶狀態") := nes_status,
+          !!get_lang_text("table.revenue_details.columns.times", "購買次數") := times,
+          !!get_lang_text("table.revenue_details.columns.recency", "最近購買天數") := r_value,
+          !!get_lang_text("table.revenue_details.columns.frequency", "購買頻率") := f_value
+        ) %>%
+        mutate(
+          across(c(2, 3, 4), ~round(., 2))
+        )
+
+      datatable(
+        display_data,
+        options = list(
+          pageLength = 10,
+          scrollX = TRUE,
+          order = list(list(1, 'desc')),  # 按總消費金額降序
+          dom = 'frtip',
+          columnDefs = list(
+            list(className = 'dt-right', targets = c(1, 2, 3, 5, 6, 7))
+          )
+        ),
+        rownames = FALSE
+      ) %>%
+        formatCurrency(c(2, 3, 4), "$")
+    })
+
+    # 下載客戶詳細資料
+    output$download_revenue_details <- downloadHandler(
+      filename = function() {
+        paste0("revenue_customer_details_", format(Sys.Date(), "%Y%m%d"), ".csv")
+      },
+      content = function(file) {
+        req(customer_data())
+        data <- customer_data()
+
+        # 準備完整資料
+        export_data <- data %>%
+          select(
+            customer_id,
+            total_spent,
+            m_value,
+            clv,
+            nes_status,
+            times,
+            r_value,
+            f_value
+          ) %>%
+          rename(
+            !!get_lang_text("table.revenue_details.columns.customer_id", "客戶ID") := customer_id,
+            !!get_lang_text("table.revenue_details.columns.total_spent", "總消費金額") := total_spent,
+            !!get_lang_text("table.revenue_details.columns.avg_spent", "平均單次消費") := m_value,
+            !!get_lang_text("table.revenue_details.columns.clv", "顧客終生價值") := clv,
+            !!get_lang_text("table.revenue_details.columns.status", "客戶狀態") := nes_status,
+            !!get_lang_text("table.revenue_details.columns.times", "購買次數") := times,
+            !!get_lang_text("table.revenue_details.columns.recency", "最近購買天數") := r_value,
+            !!get_lang_text("table.revenue_details.columns.frequency", "購買頻率") := f_value
+          )
+
+        write.csv(export_data, file, row.names = FALSE, fileEncoding = "UTF-8")
+      }
+    )
+
+    # ========== AI 分析功能 ==========
+
+    # AI 客單價分析
+    ai_aov_analysis <- reactive({
+      req(revenue_metrics())
+      metrics <- revenue_metrics()
+
+      has_new <- !is.null(metrics$new_customer_aov) && length(metrics$new_customer_aov) == 1 && !is.na(metrics$new_customer_aov)
+      has_core <- !is.null(metrics$core_customer_aov) && length(metrics$core_customer_aov) == 1 && !is.na(metrics$core_customer_aov)
+      has_arpu <- !is.null(metrics$arpu) && length(metrics$arpu) == 1 && !is.na(metrics$arpu)
+
+      # 基礎分析
+      analysis <- list(
+        new_vs_core = if(has_new && has_core) {
+          ratio <- round(metrics$core_customer_aov / metrics$new_customer_aov, 2)
+          if(ratio > 1.5) {
+            paste0(get_lang_text("ai.insights.aov_high_ratio_prefix", "✅ 主力客單價是新客的 "),
+                   ratio,
+                   get_lang_text("ai.insights.aov_high_ratio_suffix", " 倍，建議加強新客轉換策略"))
+          } else if(ratio < 0.8) {
+            paste0(get_lang_text("ai.insights.aov_low_ratio_prefix", "⚠️ 主力客單價偏低（只有新客的 "),
+                   ratio,
+                   get_lang_text("ai.insights.aov_low_ratio_suffix", " 倍），需要提升忠誠客戶價值"))
+          } else {
+            paste0(get_lang_text("ai.insights.aov_moderate_ratio_prefix", "📊 主力客單價與新客比值適中（"),
+                   ratio,
+                   get_lang_text("ai.insights.aov_moderate_ratio_suffix", " 倍）"))
+          }
+        } else {
+          get_lang_text("ai.insights.aov_insufficient_data", "📊 資料不足，無法比較新客與主力客")
+        },
+
+        recommendation = if(has_new && has_arpu && has_core) {
+          if(metrics$new_customer_aov < metrics$arpu * 0.7) {
+            get_lang_text("ai.recommendations.new_customer_strategy",
+                         "🎯 New Customer Strategy: First purchase discounts with gifts, increase first-time purchase value")
+          } else if(metrics$core_customer_aov > metrics$arpu * 1.5) {
+            get_lang_text("ai.recommendations.core_customer_strategy",
+                         "🎯 Core Customer Strategy: VIP exclusive offers, limited products, double membership points")
+          } else {
+            get_lang_text("ai.recommendations.balanced_strategy",
+                         "🎯 Balanced Strategy: Provide tiered offers, encourage spending upgrades")
+          }
+        } else {
+          get_lang_text("ai.fallbacks.need_more_data", "📌 建議收集更多交易資料進行分析")
+        }
+      )
+
+      return(analysis)
+    })
+
+    # AI CLV 分群分析
+    ai_clv_analysis <- reactive({
+      req(customer_data())
+      data <- customer_data()
+
+      # 取得語言文本
+      label_high <- get_lang_text("charts.clv_distribution.segments.high", "高價值")
+      label_mid <- get_lang_text("charts.clv_distribution.segments.mid", "中價值")
+      label_low <- get_lang_text("charts.clv_distribution.segments.low", "低價值")
+
+      # CLV 分群 (80/20法則)
+      clv_segments <- data %>%
+        filter(!is.na(clv)) %>%
+        arrange(desc(clv)) %>%
+        mutate(
+          cum_revenue = cumsum(clv),
+          total_revenue = sum(clv),
+          revenue_pct = cum_revenue / total_revenue,
+          clv_segment = case_when(
+            revenue_pct <= 0.8 ~ label_high,
+            revenue_pct <= 0.95 ~ label_mid,
+            TRUE ~ label_low
+          )
+        )
+
+      # 各群統計
+      segment_stats <- clv_segments %>%
+        group_by(clv_segment) %>%
+        summarise(
+          count = n(),
+          avg_clv = mean(clv),
+          total_clv = sum(clv),
+          pct_of_customers = n() / nrow(clv_segments) * 100,
+          pct_of_revenue = sum(clv) / sum(clv_segments$clv) * 100,
+          .groups = "drop"
+        )
+
+      # 準備建議
+      recommendations <- list(
+        high = get_lang_text("ai.recommendations.high_value_customers",
+                            "🎆 High-Value Customers: VIP exclusive service, priority pre-order access, customized products, birthday special offers"),
+        mid = get_lang_text("ai.recommendations.mid_value_customers",
+                           "🎯 Mid-Value Customers: Membership point programs, gifts with purchase, quarterly coupons, referral rewards"),
+        low = get_lang_text("ai.recommendations.low_value_customers",
+                           "💡 Low-Value Customers: First purchase offers, entry product promotions, limited-time discounts, free shipping")
+      )
+
+      return(list(
+        segments = clv_segments,
+        stats = segment_stats,
+        recommendations = recommendations
+      ))
+    })
+
+    # AI 趨勢分析（簡化版本）
+    ai_trend_analysis <- reactive({
+      return(get_lang_text("ai.insights.trend_need_data", "📊 需要更多時間序列資料進行趨勢分析"))
+    })
+
+    # 輸出 AI 分析結果
+    output$ai_aov_insights <- renderUI({
+      analysis <- ai_aov_analysis()
+
+      div(
+        style = "background: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 10px;",
+        p(analysis$new_vs_core, style = "margin-bottom: 10px;"),
+        p(analysis$recommendation, style = "margin-bottom: 0; font-weight: bold; color: #2c3e50;")
+      )
+    })
+
+    output$ai_clv_insights <- renderUI({
+      analysis <- ai_clv_analysis()
+      req(analysis)
+      stats <- analysis$stats
+
+      # 取得語言文本
+      label_high <- get_lang_text("charts.clv_distribution.segments.high", "高價值")
+
+      # 使用預設格式
+      div(
+        style = "background: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 10px;",
+
+        # 統計摘要
+        p(paste0(
+          get_lang_text("ai.insights.pareto_analysis_prefix", "📊 80/20分析："),
+          round(stats$pct_of_customers[stats$clv_segment == label_high], 1),
+          get_lang_text("ai.insights.pareto_analysis_middle", "% 的客戶貢獻了 "),
+          round(stats$pct_of_revenue[stats$clv_segment == label_high], 1),
+          get_lang_text("ai.insights.pareto_analysis_suffix", "% 的營收")
+        ), style = "font-weight: bold; margin-bottom: 15px;"),
+
+        # 各群建議
+        div(
+          h6(paste0("🎯 ", get_lang_text("ai.insights.marketing_recommendations", "行銷建議：")),
+             style = "color: #2c3e50; margin-bottom: 10px;"),
+          tags$ul(
+            style = "margin-bottom: 0;",
+            tags$li(analysis$recommendations$high, style = "margin-bottom: 5px;"),
+            tags$li(analysis$recommendations$mid, style = "margin-bottom: 5px;"),
+            tags$li(analysis$recommendations$low)
+          )
+        )
+      )
+    })
+
+    # Revenue trend insights section (dynamic - updates with language changes)
+    output$revenue_trend_insights_section <- renderUI({
+      analysis <- ai_trend_analysis()
+
+      tagList(
+        h6(paste0("🤖 ", get_lang_text("ai.insights.trend_analysis_label", "AI 趨勢分析")),
+           style = "color: #2c3e50; font-weight: bold;"),
+        div(
+          style = "background: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 10px;",
+          p(analysis, style = "margin-bottom: 0; color: #6c757d;")
+        )
+      )
+    })
+
+    # DEPRECATED: Kept for backward compatibility
+    output$ai_trend_insights <- renderUI({
+      analysis <- ai_trend_analysis()
+
+      div(
+        style = "background: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 10px;",
+        p(analysis, style = "margin-bottom: 0; color: #6c757d;")
+      )
+    })
+
+    # 下載 CLV 分群名單
+    output$download_clv_segments <- downloadHandler(
+      filename = function() {
+        paste0("clv_segments_", format(Sys.Date(), "%Y%m%d"), ".csv")
+      },
+      contentType = "text/csv",
+      content = function(file) {
+        analysis <- ai_clv_analysis()
+
+        # 取得分群標籤
+        label_high <- get_lang_text("charts.clv_distribution.segments.high", "高價值")
+        label_mid <- get_lang_text("charts.clv_distribution.segments.mid", "中價值")
+        label_low <- get_lang_text("charts.clv_distribution.segments.low", "低價值")
+
+        # 行銷建議文字（不含 emoji）
+        rec_high <- get_lang_text("ai.recommendations.high_value_simple",
+                                  "VIP專屬服務、優先預購資格、客製化產品、生日特別優惠")
+        rec_mid <- get_lang_text("ai.recommendations.mid_value_simple",
+                                 "會員積點回饋、滿額贈品、季度優惠券、推薦獎勵")
+        rec_low <- get_lang_text("ai.recommendations.low_value_simple",
+                                 "入門產品促銷、限時特價、免運費活動")
+
+        segments_data <- analysis$segments %>%
+          select(customer_id, clv, clv_segment) %>%
+          mutate(
+            行銷建議 = case_when(
+              clv_segment == label_high ~ rec_high,
+              clv_segment == label_mid ~ rec_mid,
+              clv_segment == label_low ~ rec_low,
+              TRUE ~ ""
+            )
+          ) %>%
+          rename(
+            !!get_lang_text("table.revenue_details.columns.customer_id", "客戶ID") := customer_id,
+            !!get_lang_text("table.revenue_details.columns.clv", "顧客終生價值") := clv,
+            !!get_lang_text("table.segments.column_segment", "價值分群") := clv_segment
+          ) %>%
+          arrange(desc(clv))
+
+        write.csv(segments_data, file, row.names = FALSE, fileEncoding = "UTF-8")
+      }
+    )
+
+    # ========== AI INSIGHTS GENERATION (4-TAB STRUCTURE) ==========
+
+    # Reactive values to store AI insights
+    ai_insights <- reactiveValues(
+      is_generating = FALSE,
+      revenue_summary = NULL,
+      arpu_insights = NULL,
+      clv_recommendations = NULL,
+      consistency_analysis = NULL
+    )
+
+    # Generate AI Insights Button Handler
+    observeEvent(input$generate_insights, {
+      req(revenue_metrics(), pareto_analysis())
+
+      ai_insights$is_generating <- TRUE
+      cat("[Revenue Pulse] Generating AI insights...\n")
+
+      metrics <- revenue_metrics()
+      pareto <- pareto_analysis()
+
+      # Check if GPT is enabled
+      enable_gpt <- !is.null(chat_api) && (module_config$ai_insights$use_gpt %||% FALSE)
+      gpt_model <- module_config$ai_insights$gpt_model %||% cfg_ai_model
+
+      tryCatch({
+        # 1. Revenue Summary Insight
+        if (enable_gpt && !is.null(chat_api)) {
+          # 取得當前語言
+          texts <- module_texts()
+          current_lang <- if (!is.null(texts) && !is.null(texts$language)) {
+            texts$language
+          } else {
+            "zh_TW"
+          }
+
+          # 生成快取資料（用於快取鍵）
+          cache_data <- list(
+            total_revenue = round(metrics$total_revenue, 0),
+            customer_count = metrics$customer_count,
+            arpu = round(metrics$arpu, 2),
+            clv = round(metrics$avg_clv, 2),
+            aov = round(metrics$aov, 2),
+            consistency = round(metrics$consistency_score, 1),
+            pareto_pct = round(pareto$pareto_80_point$customer_pct[1] * 100, 1)
+          )
+
+          # 生成快取鍵
+          cache_key <- get_ai_cache_key("revenue_summary", cache_data, current_lang)
+
+          # 檢查快取
+          cached_result <- get_cached_ai(cache_key)
+          if (!is.null(cached_result)) {
+            cat("[Revenue Pulse] 使用快取的 AI 洞察\n")
+            ai_insights$revenue_summary <- cached_result
+          } else {
+            # Use GPT for advanced insights
+            metrics_template <- get_lang_text("ai_insights.prompts.revenue_summary.metrics_template",
+              "- Total Revenue: ${total_revenue}\n- Customers: {customer_count}\n- ARPU: ${arpu}\n- Avg CLV: ${clv}\n- AOV: ${aov}\n- Consistency: {consistency}%\n- Pareto: {pareto_pct}% customers contribute 80% revenue")
+
+            # Replace placeholders
+            metrics_text <- metrics_template
+            metrics_text <- gsub("\\{total_revenue\\}", format(cache_data$total_revenue, big.mark = ","), metrics_text)
+            metrics_text <- gsub("\\{customer_count\\}", cache_data$customer_count, metrics_text)
+            metrics_text <- gsub("\\{arpu\\}", cache_data$arpu, metrics_text)
+            metrics_text <- gsub("\\{clv\\}", cache_data$clv, metrics_text)
+            metrics_text <- gsub("\\{aov\\}", cache_data$aov, metrics_text)
+            metrics_text <- gsub("\\{consistency\\}", cache_data$consistency, metrics_text)
+            metrics_text <- gsub("\\{pareto_pct\\}", cache_data$pareto_pct, metrics_text)
+
+            prompt <- paste0(
+              get_lang_text("ai_insights.prompts.revenue_summary.system", "Analyze the following revenue data and provide strategic insights:"), "\n",
+              metrics_text, "\n\n",
+              get_lang_text("ai_insights.prompts.revenue_summary.request", "Please provide: 1) Overall revenue health assessment 2) Key findings 3) Optimization recommendations")
+            )
+
+            result <- chat_api(prompt, model = gpt_model)
+            # 儲存快取
+            set_cached_ai(cache_key, result)
+            ai_insights$revenue_summary <- result
+          }
+        } else {
+          # Fallback: Rule-based insights
+          title <- get_lang_text("ai_insights.fallback.revenue_summary.title", "📊 Revenue Overview")
+          line1_template <- get_lang_text("ai_insights.fallback.revenue_summary.template_line1", "✓ Total Revenue: ${total_revenue}")
+          line2_template <- get_lang_text("ai_insights.fallback.revenue_summary.template_line2", "✓ {customer_count} Customers")
+          line3_template <- get_lang_text("ai_insights.fallback.revenue_summary.template_line3", "✓ Per Customer Contribution: ${arpu}")
+
+          line1 <- gsub("\\{total_revenue\\}", format(round(metrics$total_revenue, 0), big.mark = ","), line1_template)
+          line2 <- gsub("\\{customer_count\\}", metrics$customer_count, line2_template)
+          line3 <- gsub("\\{arpu\\}", round(metrics$arpu, 2), line3_template)
+
+          consistency_msg <- if (metrics$consistency_score >= 70) {
+            get_lang_text("ai_insights.fallback.revenue_summary.high_consistency", "✅ High revenue stability, consistent customer behavior")
+          } else if (metrics$consistency_score >= 40) {
+            get_lang_text("ai_insights.fallback.revenue_summary.medium_consistency", "⚠️ Moderate revenue fluctuation, recommend strengthening high-value customer engagement")
+          } else {
+            get_lang_text("ai_insights.fallback.revenue_summary.low_consistency", "🔴 High revenue volatility, need to optimize customer structure")
+          }
+
+          ai_insights$revenue_summary <- paste0(
+            title, "\n\n",
+            line1, "\n",
+            line2, "\n",
+            line3, "\n\n",
+            consistency_msg
+          )
+        }
+
+        # 2. ARPU Analysis Insight
+        segment_stats <- pareto$segment_stats
+
+        # Match segments by translated labels
+        high_value_label <- get_lang_text("segment_labels.high_value", "High Value (Top 20%)")
+        low_value_label <- get_lang_text("segment_labels.low_value", "Low Value (Bottom 20%)")
+
+        high_value <- segment_stats %>% filter(segment == high_value_label)
+        low_value <- segment_stats %>% filter(segment == low_value_label)
+
+        arpu_title <- get_lang_text("ai_insights.fallback.arpu_analysis.title", "💰 ARPU Deep Analysis")
+        arpu_line1_template <- get_lang_text("ai_insights.fallback.arpu_analysis.line1", "Per Customer Spend: ${arpu}")
+        arpu_line2_template <- get_lang_text("ai_insights.fallback.arpu_analysis.line2", "High Value Customer Avg: ${high_value_avg}")
+        arpu_line3_template <- get_lang_text("ai_insights.fallback.arpu_analysis.line3", "Low Value Customer Avg: ${low_value_avg}")
+
+        arpu_line1 <- gsub("\\{arpu\\}", round(metrics$arpu, 2), arpu_line1_template)
+        arpu_line2 <- gsub("\\{high_value_avg\\}", round(high_value$avg_revenue[1], 0), arpu_line2_template)
+        arpu_line3 <- gsub("\\{low_value_avg\\}", round(low_value$avg_revenue[1], 0), arpu_line3_template)
+
+        ai_insights$arpu_insights <- paste0(
+          arpu_title, "\n\n",
+          arpu_line1, "\n",
+          arpu_line2, "\n",
+          arpu_line3, "\n\n",
+          get_lang_text("ai_insights.fallback.arpu_analysis.recommendations_title", "💡 Recommendations:"), "\n",
+          "- ", get_lang_text("ai_insights.fallback.arpu_analysis.rec1", "Provide VIP exclusive services for high-value customers"), "\n",
+          "- ", get_lang_text("ai_insights.fallback.arpu_analysis.rec2", "Promote upgrade plans for mid-value customers"), "\n",
+          "- ", get_lang_text("ai_insights.fallback.arpu_analysis.rec3", "Activate promotional campaigns for low-value customers")
+        )
+
+        # 3. CLV Optimization Recommendations
+        clv_title <- get_lang_text("ai_insights.fallback.clv_recommendations.title", "📈 CLV Enhancement Strategy")
+        clv_line1_template <- get_lang_text("ai_insights.fallback.clv_recommendations.line1", "Current Avg CLV: ${avg_clv}")
+        clv_line2_template <- get_lang_text("ai_insights.fallback.clv_recommendations.line2", "AOV: ${aov}")
+        clv_line3_template <- get_lang_text("ai_insights.fallback.clv_recommendations.line3", "Repeat Rate: {repeat_rate} times/person")
+
+        clv_line1 <- gsub("\\{avg_clv\\}", round(metrics$avg_clv, 2), clv_line1_template)
+        clv_line2 <- gsub("\\{aov\\}", round(metrics$aov, 2), clv_line2_template)
+        clv_line3 <- gsub("\\{repeat_rate\\}", round(metrics$total_transactions / metrics$customer_count, 2), clv_line3_template)
+
+        ai_insights$clv_recommendations <- paste0(
+          clv_title, "\n\n",
+          clv_line1, "\n",
+          clv_line2, "\n",
+          clv_line3, "\n\n",
+          get_lang_text("ai_insights.fallback.clv_recommendations.optimization_title", "🎯 Optimization Directions:"), "\n",
+          "1. ", get_lang_text("ai_insights.fallback.clv_recommendations.opt1", "Increase AOV: Bundle sales, gifts with purchase"), "\n",
+          "2. ", get_lang_text("ai_insights.fallback.clv_recommendations.opt2", "Increase purchase frequency: Membership programs, regular promotions"), "\n",
+          "3. ", get_lang_text("ai_insights.fallback.clv_recommendations.opt3", "Extend customer lifecycle: Loyalty rewards, after-sales service")
+        )
+
+        # 4. Consistency Analysis
+        consistency_title <- get_lang_text("ai_insights.fallback.consistency_analysis.title", "⚖️ Revenue Stability Analysis")
+        score_line_template <- get_lang_text("ai_insights.fallback.consistency_analysis.score_line", "Consistency Score: {score}%")
+        cv_line_template <- get_lang_text("ai_insights.fallback.consistency_analysis.cv_line", "Coefficient of Variation: {cv}")
+
+        score_line <- gsub("\\{score\\}", round(metrics$consistency_score, 1), score_line_template)
+        cv_line <- gsub("\\{cv\\}", round(metrics$cv_coefficient, 3), cv_line_template)
+
+        consistency_detail <- if (metrics$consistency_score >= 70) {
+          level <- get_lang_text("ai_insights.fallback.consistency_analysis.excellent_level", "✅ Excellent: Stable revenue performance, solid customer base")
+          advice <- get_lang_text("ai_insights.fallback.consistency_analysis.excellent_advice", "Recommendation: Maintain current strategy, continuous optimization")
+          paste0(level, "\n\n", advice)
+        } else if (metrics$consistency_score >= 40) {
+          level <- get_lang_text("ai_insights.fallback.consistency_analysis.good_level", "⚠️ Good: Moderate revenue fluctuation")
+          advice_title <- get_lang_text("ai_insights.fallback.consistency_analysis.good_advice", "Recommendations:")
+          advice1 <- get_lang_text("ai_insights.fallback.consistency_analysis.good_advice1", "Analyze high-volatility customer characteristics")
+          advice2 <- get_lang_text("ai_insights.fallback.consistency_analysis.good_advice2", "Establish tiered customer management")
+          advice3 <- get_lang_text("ai_insights.fallback.consistency_analysis.good_advice3", "Balance investment in new vs. existing customers")
+          paste0(level, "\n\n", advice_title, "\n- ", advice1, "\n- ", advice2, "\n- ", advice3)
+        } else {
+          level <- get_lang_text("ai_insights.fallback.consistency_analysis.poor_level", "🔴 Needs Improvement: High revenue volatility")
+          advice_title <- get_lang_text("ai_insights.fallback.consistency_analysis.poor_advice", "Recommendations:")
+          advice1 <- get_lang_text("ai_insights.fallback.consistency_analysis.poor_advice1", "Diversify customer sources")
+          advice2 <- get_lang_text("ai_insights.fallback.consistency_analysis.poor_advice2", "Reduce dependency on single large customers")
+          advice3 <- get_lang_text("ai_insights.fallback.consistency_analysis.poor_advice3", "Establish early warning mechanisms")
+          paste0(level, "\n\n", advice_title, "\n- ", advice1, "\n- ", advice2, "\n- ", advice3)
+        }
+
+        ai_insights$consistency_analysis <- paste0(
+          consistency_title, "\n\n",
+          score_line, "\n",
+          cv_line, "\n\n",
+          consistency_detail
+        )
+
+        cat("[Revenue Pulse] AI insights generated successfully\n")
+
+      }, error = function(e) {
+        cat("[Revenue Pulse] ERROR generating AI insights:", e$message, "\n")
+        ai_insights$revenue_summary <- get_lang_text("ai_insights.empty_state.error", "AI insight generation failed, please try again later")
+      })
+
+      ai_insights$is_generating <- FALSE
+    })
+
+    # Render AI Insights Outputs (4 tabs)
+    output$ai_revenue_summary <- renderUI({
+      if (is.null(ai_insights$revenue_summary)) {
+        return(
+          div(
+            style = "text-align: center; padding: 30px; color: #6c757d;",
+            icon("info-circle", style = "font-size: 48px; margin-bottom: 15px;"),
+            p(get_lang_text("ai_insights.empty_state.message", "Click 'Generate AI Insights' button to get revenue analysis"))
+          )
+        )
+      }
+
+      div(
+        style = "background: #f8f9fa; padding: 20px; border-radius: 8px;",
+        pre(ai_insights$revenue_summary, style = "white-space: pre-wrap; font-family: inherit; margin: 0;")
+      )
+    })
+
+    output$ai_arpu_insights <- renderUI({
+      if (is.null(ai_insights$arpu_insights)) {
+        return(
+          div(
+            style = "text-align: center; padding: 30px; color: #6c757d;",
+            icon("info-circle", style = "font-size: 48px; margin-bottom: 15px;"),
+            p(get_lang_text("ai_insights.empty_state.message", "Click 'Generate AI Insights' button to get ARPU analysis"))
+          )
+        )
+      }
+
+      div(
+        style = "background: #f8f9fa; padding: 20px; border-radius: 8px;",
+        pre(ai_insights$arpu_insights, style = "white-space: pre-wrap; font-family: inherit; margin: 0;")
+      )
+    })
+
+    output$ai_clv_recommendations <- renderUI({
+      if (is.null(ai_insights$clv_recommendations)) {
+        return(
+          div(
+            style = "text-align: center; padding: 30px; color: #6c757d;",
+            icon("info-circle", style = "font-size: 48px; margin-bottom: 15px;"),
+            p(get_lang_text("ai_insights.empty_state.message", "Click 'Generate AI Insights' button to get CLV recommendations"))
+          )
+        )
+      }
+
+      div(
+        style = "background: #f8f9fa; padding: 20px; border-radius: 8px;",
+        pre(ai_insights$clv_recommendations, style = "white-space: pre-wrap; font-family: inherit; margin: 0;")
+      )
+    })
+
+    output$ai_consistency_analysis <- renderUI({
+      if (is.null(ai_insights$consistency_analysis)) {
+        return(
+          div(
+            style = "text-align: center; padding: 30px; color: #6c757d;",
+            icon("info-circle", style = "font-size: 48px; margin-bottom: 15px;"),
+            p(get_lang_text("ai_insights.empty_state.message", "Click 'Generate AI Insights' button to get consistency analysis"))
+          )
+        )
+      }
+
+      div(
+        style = "background: #f8f9fa; padding: 20px; border-radius: 8px;",
+        pre(ai_insights$consistency_analysis, style = "white-space: pre-wrap; font-family: inherit; margin: 0;")
+      )
+    })
+
+    # ========== END AI INSIGHTS ==========
+
+  })
+}

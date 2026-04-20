@@ -1,0 +1,1639 @@
+#' @principle P15 Debug Efficiency Exception
+#' @principle P76 Error Handling Patterns
+#' @principle P77 Performance Optimization
+#' @principle P80 Integer ID Consistency
+#' @principle P81 Tidyverse-Shiny Terminology Alignment
+#' @principle R76 Module Data Connection Rule
+#' @principle R88 Shiny Module ID Handling
+#' @principle R89 Integer ID Type Conversion
+#' @principle R90 ID Relationship Validation
+#' @principle MP52 Unidirectional Data Flow
+#' @principle MP53 Feedback Loop
+#' @principle MP54 UI-Server Correspondence
+#' @principle R116 Enhanced Data Access with tbl2
+#' @r21_exception This file contains the UI-server-defaults triple for microCustomer module with Enhanced Data Access (tbl2)
+#' @justification These components are frequently debugged together during UI development and data integration
+#' @refactor_plan To be refactored back into separate files once micro-level component design is finalized (est. Q3 2025)
+
+# Define the string concatenation operator if it doesn't exist
+if (!exists("%+%")) {
+  `%+%` <- function(x, y) paste0(x, y)
+}
+
+# NSQL Data Flow Documentation
+# DATA_FLOW(component: customer_filter) {
+#   SOURCE: app_data_connection
+#   INITIALIZE: {
+#     EXTRACT(app_data_connection → GET dna_data → dna_data)
+#     EXTRACT(app_data_connection → GET customer_profiles → profiles)
+#     EXTRACT(dna_data → DISTINCT customer_id → valid_ids)
+#     FILTER(profiles → WHERE customer_id IN valid_ids → dropdown_options)
+#   }
+#   ON_SELECT: {
+#     value = customer_filter.selected
+#     FILTER(profiles → WHERE customer_id = as.integer(value) → customer_detail)
+#     FILTER(dna_data → WHERE customer_id = as.integer(value) → customer_metrics)
+#     JOIN(customer_detail → WITH customer_metrics ON customer_id → display_data)
+#   }
+# }
+
+####microCustomerDefaults####
+
+#' Default Values for Micro Customer Component
+#'
+#' This function provides standard default values for the micro customer component.
+#' These defaults ensure that all UI outputs have appropriate values even when
+#' data is unavailable or invalid, implementing the UI-Server Pairing Rule.
+#'
+#' @return Named list of output IDs and their default values
+#' @export
+microCustomerDefaults <- function() {
+  list(
+    # Customer history metrics
+    dna_time_first = "N/A",
+    dna_time_first_to_now = "N/A",
+    
+    # RFM metrics
+    dna_r_label = "N/A",
+    dna_r_value = "N/A",
+    dna_f_label = "N/A",
+    dna_f_value = "N/A",
+    dna_m_label = "N/A",
+    dna_m_value = "N/A",
+    
+    # Customer activity metrics
+    dna_cai_label = "N/A",
+    dna_cai = "N/A",
+    dna_ipt_mean = "N/A",
+    
+    # Value metrics
+    dna_pcv = "N/A",
+    dna_clv = "N/A",
+    dna_cri = "N/A",
+    
+    # Prediction metrics
+    dna_nrec = "N/A",
+    dna_nrec_prob = "N/A",
+    
+    # Status metrics
+    dna_nes_status = "N/A",
+    
+    # Transaction metrics
+    dna_nt = "N/A",
+    dna_e0t = "N/A"
+  )
+}
+
+
+####microCustomerFilterUI####
+
+#' Micro Customer Filter UI Component
+#'
+#' This component provides a filter interface for selecting customers
+#' to be displayed in the micro-level customer analysis view.
+#' Follows P75: Search Input Optimization pattern and P81: Tidyverse-Shiny Terminology Alignment.
+#'
+#' @param id The module ID
+#' @param translate 翻譯函數，默認為identity函數
+#'
+#' @return A UI component for filtering customers
+#' @export
+microCustomerFilterUI <- function(id, translate = function(x) x) {
+  ns <- NS(id)
+  
+  tagList(
+    tags$head(
+      tags$style(HTML("
+          .selectize-input, .selectize-input input {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding-right: 20px !important;
+          }
+
+      "))
+    ),
+    div(
+      class = "customer-filter-container",
+      style = "padding: 15px; background-color: #f8f9fa; border-radius: 5px; margin-bottom: 20px;",
+      fluidRow(
+        column(
+          width = 12,
+          #h4(translate("Customer DNA"), style = "margin-bottom: 15px;"),
+          # 改用不帶 server=TRUE 的 selectizeInput，但使用 NULL choices 為後續更新做準備
+          shiny::selectizeInput(
+            inputId = ns("customer_filter"), # P81: filter aligns with dplyr::filter
+            label = translate("Select Customer:"),
+            choices = NULL, # 初始為空，將由服務器填充
+            selected = NULL,
+            options = list(
+              placeholder = translate("開始輸入以搜尋客戶..."),
+              onInitialize = I('function() { this.setValue(""); }'),
+              maxOptions = 50 # 限制顯示結果數量
+            )
+          ),
+          div(
+            style = "margin-top: 10px; width: 200px; margin-left: 10px;",
+            actionButton(
+              inputId = ns("clear_filter"),
+              label = translate("清除篩選"),
+              icon = icon("times"),
+              class = "btn-outline-secondary",
+              width = "100%"
+            )
+          )
+        )
+      )
+    )
+  )
+}
+
+
+####microCustomerDisplayUI####
+
+#' Micro Customer Display UI Component
+#'
+#' This component provides the UI elements for displaying detailed customer analytics
+#' in the micro-level view of the application.
+#'
+#' IMPORTANT: According to the UI-Server Pairing Rule, this UI component MUST be used with
+#' its corresponding server component microCustomerServer(). All outputs defined here
+#' must be fulfilled by the server component to avoid broken displays.
+#'
+#' @param id The module ID
+#'
+#' @return A UI component
+#' @export
+microCustomerDisplayUI <- function(id) {
+  ns <- NS(id)
+  
+  bslib::nav_panel(
+    title = "micro",
+    # 使用基本的shiny元素替代bs4Dash專有元素
+    div(
+      class = "card",
+      style = "width: 100%; margin-bottom: 20px;",
+      div(
+        class = "card-body",
+        # Header: Customer Name and Email
+        fluidRow(
+          column(12,
+                 div(
+                   class = "customer-profile-header",
+                   style = "margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #eee; text-align: center;",
+                   div(
+                     style = "font-size: 1.4rem; font-weight: 600;",
+                     htmlOutput(ns("customer_name"))
+                   ),
+                   div(
+                     style = "font-size: 1rem; color: #666;",
+                     htmlOutput(ns("customer_email"))
+                   )
+                 )
+          )
+        ),
+        # Row 1: 顧客資歷、最近購買日(R)、購買頻率(F)
+        fluidRow(
+          column(4, bs4Dash::valueBoxOutput(ns("dna_time_first"), width = 12)),
+          column(4, bs4Dash::valueBoxOutput(ns("dna_recency"), width = 12)),
+          column(4, bs4Dash::valueBoxOutput(ns("dna_frequency"), width = 12))
+        ),
+        # Row 2: 購買金額(M)、顧客活躍度(CAI)、顧客平均購買週期(IPT)
+        fluidRow(
+          column(4, bs4Dash::valueBoxOutput(ns("dna_monetary"), width = 12)),
+          column(4, bs4Dash::valueBoxOutput(ns("dna_cai"), width = 12)),
+          column(4, bs4Dash::valueBoxOutput(ns("dna_ipt"), width = 12))
+        ),
+        # Row 3: 過去價值(PCV)、顧客終身價值(CLV)、顧客交易穩定度 (CRI)
+        fluidRow(
+          column(4, bs4Dash::valueBoxOutput(ns("dna_pcv"), width = 12)),
+          column(4, bs4Dash::valueBoxOutput(ns("dna_clv"), width = 12)),
+          column(4, bs4Dash::valueBoxOutput(ns("dna_cri"), width = 12))
+        ),
+        # Row 4: 顧客狀態(NES)、新客單價、主力客單價
+        fluidRow(
+          column(4, bs4Dash::valueBoxOutput(ns("dna_nes"), width = 12)),
+          column(4, bs4Dash::valueBoxOutput(ns("dna_nt"), width = 12)),
+          column(4, bs4Dash::valueBoxOutput(ns("dna_e0t"), width = 12))
+        )
+      )
+    )
+  )
+}
+
+####microCustomerServer####
+
+#' Unified Micro Customer Server Component with Enhanced Data Access
+#'
+#' This component integrates both filtering and display logic for the micro customer
+#' analytics view. It handles customer search, filtering, and data visualization.
+#' Implements R116 Enhanced Data Access with tbl2 for compatibility with any connection type.
+#'
+#' @param id The module ID
+#' @param app_data_connection App data connection object providing access to data sources.
+#'        This can be any of: DBI connection, list with data frames, list with functions,
+#'        reactive expression, or direct data frame.
+#' @param session 當前Shiny會話，用於registerDataObj
+#'
+#' @return Reactive expression that returns filtered data
+#' @export
+#' @implements R116 Enhanced Data Access with tbl2
+microCustomerServer <- function(id, 
+                                app_data_connection = NULL,
+                                session = getDefaultReactiveDomain(),
+                                config = NULL) {
+  # Debug log to check arguments
+  cat("DEBUG: microCustomerServer called with ID:", id, "\n")
+  
+  # Check what type of config we received
+  if (is.null(config)) {
+    cat("DEBUG TRACE: config parameter is NULL\n")
+  } else if (is.function(config) && "reactive" %in% class(config)) {
+    cat("DEBUG TRACE: config parameter is a reactive expression\n")
+    
+    # Try to get the initial value of the reactive
+    tryCatch({
+      initial_config <- config()
+      if (is.list(initial_config) && !is.null(initial_config$filters) && 
+          !is.null(initial_config$filters$platform_id)) {
+        cat("DEBUG TRACE: Initial platform_id from reactive config:", 
+            initial_config$filters$platform_id, "\n")
+      } else {
+        cat("DEBUG TRACE: Reactive config doesn't contain platform_id\n")
+      }
+    }, error = function(e) {
+      cat("DEBUG TRACE: Error accessing reactive config:", e$message, "\n")
+    })
+  } else {
+    cat("DEBUG TRACE: config parameter is a regular value (class:", class(config)[1], ")\n")
+  }
+  
+  # 創建整合的模組伺服器
+  moduleServer(id, function(input, output, session) {
+    # Log module initialization
+    cat("INFO: Initializing microCustomer module with ID:", id, "\n")
+    
+    # == 定義常量 ==
+    textRlabel <- c("極近", "近期", "一般", "久遠", "非常久遠")
+    textFlabel <- c("極低", "低", "一般", "高", "非常高")
+    textMlabel <- c("極低", "低", "一般", "高", "非常高")
+    textCAIlabel <- c("不活躍", "低度活躍", "一般活躍", "活躍", "非常活躍")
+    
+    # == 默認值設置 ==
+    defaults <- microCustomerDefaults()
+    
+    # == 反應式數據來源 - 使用R91 Universal Data Access Pattern ==
+    
+    # Get platform filter from config if available
+    platform_filter <- reactive({
+      # For debugging - log the config
+      cat("DEBUG TRACE: platform_filter reactive is executing\n")
+      
+      # Get the config value, handling both reactive and non-reactive cases
+      config_value <- if (is.function(config) && "reactive" %in% class(config)) {
+        # If config is a reactive expression, evaluate it
+        tryCatch({
+          cat("DEBUG TRACE: Evaluating reactive config...\n") 
+          result <- config()
+          cat("DEBUG TRACE: Reactive config evaluated successfully\n")
+          result
+        }, error = function(e) {
+          cat("DEBUG TRACE: Error evaluating reactive config:", e$message, "\n")
+          NULL
+        })
+      } else {
+        # If config is a regular value, use it directly
+        cat("DEBUG TRACE: Using config as regular value\n")
+        config
+      }
+      
+      # Check if a configuration was provided and contains platform filter
+      if (!is.null(config_value) && is.list(config_value) && 
+          !is.null(config_value$filters) && is.list(config_value$filters) && 
+          !is.null(config_value$filters$platform_id)) {
+        platform_id <- config_value$filters$platform_id
+        cat("DEBUG TRACE: Using platform filter from config:", platform_id, "\n")
+        return(platform_id)
+      } else {
+        cat("DEBUG TRACE: config_value doesn't contain platform_id\n")
+        cat("DEBUG TRACE: config_value is NULL:", is.null(config_value), "\n")
+        if (!is.null(config_value)) {
+          cat("DEBUG TRACE: config_value is a list:", is.list(config_value), "\n")
+          if (is.list(config_value)) {
+            cat("DEBUG TRACE: config_value$filters exists:", !is.null(config_value$filters), "\n")
+          }
+        }
+      }
+      
+      # Fallback - try to use input$platform if it exists
+      if (!is.null(input$platform)) {
+        platform_id <- as.integer(input$platform)
+        cat("DEBUG TRACE: Using platform filter from input:", platform_id, "\n")
+        return(platform_id)
+      }
+      
+      cat("DEBUG TRACE: No platform filter applied\n")
+      return(NULL)
+    })
+    
+    # 從連接獲取DNA數據
+    df_dna_by_customer <- reactive({
+      # P76: 錯誤處理前先確認資料連接存在
+      req(app_data_connection)
+      
+      cat("DEBUG TRACE: df_dna_by_customer reactive running\n")
+      
+      # Get current platform filter
+      platform_id <- platform_filter()
+      cat("DEBUG TRACE: Got platform_id =", platform_id, "for DNA data query\n")
+      
+      # Attempt to access both table names that might contain DNA data
+      tryCatch({
+        # Try df_dna_by_customer first (aligns with the debug message we see)
+        table_name <- "df_dna_by_customer"
+        
+        # Get base table reference using tbl2
+        dna_tbl <- tbl2(app_data_connection, table_name)
+        
+        # Apply platform filter directly using dplyr
+        if (!is.null(platform_id) && as.integer(platform_id) > 0) {
+          platform_id_int <- as.integer(platform_id)
+          cat("DEBUG TRACE: Using tbl2 with filter for platform_id =", platform_id_int, "\n")
+          
+          # Clean dplyr filtering approach
+          result <- dna_tbl %>%
+            dplyr::filter(as.integer(platform_id) == platform_id_int) %>%
+            dplyr::collect()
+        } else {
+          cat("DEBUG TRACE: Using tbl2 without platform filter\n")
+          result <- dna_tbl %>% dplyr::collect()
+        }
+        
+        # Validate result
+        if (is.null(result) || !is.data.frame(result) || nrow2(result) == 0) {
+          cat("DEBUG TRACE: No DNA data available after collection\n")
+          return(NULL)
+        }
+        
+        cat("DEBUG TRACE: Retrieved", nrow2(result), "DNA data rows\n")
+        return(result)
+        
+      }, error = function(e) {
+        # If first table name fails, try the alternative
+        tryCatch({
+          cat("DEBUG TRACE: First table attempt failed, trying alternative 'dna_by_customer'\n")
+          dna_tbl <- tbl2(app_data_connection, "dna_by_customer")
+          
+          # Apply platform filter directly using dplyr
+          if (!is.null(platform_id) && as.integer(platform_id) > 0) {
+            platform_id_int <- as.integer(platform_id)
+            result <- dna_tbl %>%
+              dplyr::filter(as.integer(platform_id) == platform_id_int) %>%
+              dplyr::collect()
+          } else {
+            result <- dna_tbl %>% dplyr::collect()
+          }
+          
+          if (is.null(result) || !is.data.frame(result) || nrow2(result) == 0) {
+            cat("DEBUG TRACE: No DNA data available from alternative table\n")
+            return(NULL)
+          }
+          
+          cat("DEBUG TRACE: Retrieved", nrow2(result), "DNA data rows from alternative table\n")
+          return(result)
+          
+        }, error = function(e2) {
+          # Both attempts failed
+          cat("ERROR: Could not access DNA data tables:", e2$message, "\n")
+          return(NULL)
+        })
+      })
+    })
+    
+    # 從連接獲取客戶資料
+    df_customer_profile <- reactive({
+      # P76: 錯誤處理前先確認資料連接存在
+      req(app_data_connection)
+      
+      # Get current platform filter
+      platform_id <- platform_filter()
+      cat("DEBUG TRACE: Getting customer profiles for platform_id =", platform_id, "\n")
+      
+      # Using tbl2 with clean dplyr approach
+      tryCatch({
+        # Get a reference to the customer_profile table
+        profile_tbl <- tbl2(app_data_connection, "customer_profile")
+        
+        # Apply platform filter directly in the database query when possible
+        if (!is.null(platform_id) && as.integer(platform_id) > 0) {
+          platform_id_int <- as.integer(platform_id)
+          cat("DEBUG TRACE: Using tbl2 with filter for customer profiles, platform_id =", platform_id_int, "\n")
+          
+          # Use dplyr filter with explicit integer conversion for consistency
+          result <- profile_tbl %>%
+            dplyr::filter(as.integer(platform_id) == platform_id_int) %>%
+            dplyr::collect()
+        } else {
+          cat("DEBUG TRACE: Using tbl2 without platform filter for customer profiles\n")
+          result <- profile_tbl %>% dplyr::collect()
+        }
+        
+        # Validate the result
+        if (is.null(result) || !is.data.frame(result) || nrow2(result) == 0) {
+          cat("WARNING: No customer profile data available\n")
+          return(NULL)
+        }
+        
+        cat("DEBUG TRACE: Retrieved", nrow2(result), "customer profile rows\n")
+        return(result)
+        
+      }, error = function(e) {
+        cat("ERROR in tbl2 for customer_profile:", e$message, "\n")
+        return(NULL)
+      })
+    })
+    
+    # 取得有效的客戶ID列表 - 只包含有DNA數據的客戶
+    valid_customer_ids <- reactive({
+      # P76: 錯誤處理模式
+      dna_data <- df_dna_by_customer()
+      if (is.null(dna_data) || !is.data.frame(dna_data) || nrow2(dna_data) == 0) {
+        cat("DEBUG: No DNA data available for extracting customer IDs\n")
+        return(integer(0))
+      }
+      
+      # R89: 確保客戶ID為整數類型
+      as.integer(unique(dna_data[["customer_id"]]))
+    })
+    
+    # 存儲篩選後的客戶數據（選擇結果）
+    filtered_data <- reactiveVal(NULL)
+    
+    # 存儲完整的客戶數據作為反應式值，以便稍後在搜索時使用
+    all_customer_choices <- reactiveVal(NULL)
+    
+    # Create a reactive to track the current platform filter
+    current_platform <- reactiveVal(NULL)
+    
+    # React to platform filter changes to reset selection
+    observeEvent(platform_filter(), {
+      new_platform <- platform_filter()
+      old_platform <- current_platform()
+      
+      cat("DEBUG: Platform filter changing from", 
+          if(is.null(old_platform)) "NULL" else old_platform, 
+          "to", 
+          if(is.null(new_platform)) "NULL" else new_platform, "\n")
+      
+      # Update the current platform tracker
+      current_platform(new_platform)
+      
+      # Force data refresh for debug purposes
+      cat("DEBUG: Attempting to fetch data for platform:", new_platform, "\n")
+      
+      # Explicitly try to get data to debug issues
+      tryCatch({
+        profiles_data <- df_customer_profile()
+        cat("DEBUG: Platform", new_platform, "has", 
+            if(is.null(profiles_data)) "NULL" else nrow2(profiles_data), 
+            "customer profiles\n")
+      }, error = function(e) {
+        cat("ERROR fetching profiles for platform", new_platform, ":", e$message, "\n")
+      })
+      
+      tryCatch({
+        dna_data <- df_dna_by_customer()
+        cat("DEBUG: Platform", new_platform, "has", 
+            if(is.null(dna_data)) "NULL" else nrow2(dna_data), 
+            "DNA records\n")
+      }, error = function(e) {
+        cat("ERROR fetching DNA data for platform", new_platform, ":", e$message, "\n")
+      })
+      
+      # Only reset selection when platform actually changes from a valid value to another value
+      if (!is.null(old_platform) && !is.null(new_platform) && old_platform != new_platform) {
+        cat("DEBUG: Platform changed - resetting customer selection\n")
+        # Reset the customer selection
+        updateSelectizeInput(
+          session = session,
+          inputId = "customer_filter",
+          selected = ""
+        )
+        
+        # Force reinitialization of data sources with the new platform filter
+        # This will create an invalidation which should trigger reactivity
+        invalidateLater(100, session)
+      }
+    })
+    
+    # == 下拉選單初始化 - 為客戶篩選填充選項 ==
+    # Make the dropdown react to changes in platform filter
+    observe({
+      # This will cause the dropdown to re-initialize when platform filter changes
+      platform_id <- platform_filter()
+      cat("DEBUG: Re-initializing dropdown with platform filter:", 
+          if(is.null(platform_id)) "NULL" else platform_id, "\n")
+      # P77: 性能優化 - 高效準備下拉選單
+      profiles <- df_customer_profile()
+      valid_ids <- valid_customer_ids()
+      
+      # We already have platform_id from above, no need to fetch it again
+      if (!is.null(platform_id) && length(valid_ids) == 0) {
+        cat("DEBUG: No customers found for platform ID:", platform_id, "\n")
+        updateSelectizeInput(
+          session = session,
+          inputId = "customer_filter",
+          choices = setNames("", paste0("-- No customers for platform ", platform_id, " --"))
+        )
+        return()
+      }
+      
+      # P76: 錯誤處理 - 確保客戶資料存在
+      if (is.null(profiles) || !is.data.frame(profiles) || nrow2(profiles) == 0) {
+        cat("DEBUG: Customer profiles data not available\n")
+        updateSelectizeInput(
+          session = session,
+          inputId = "customer_filter",
+          choices = c("-- 無客戶資料 --" = "")
+        )
+        return()
+      }
+      
+      # P76: 錯誤處理 - 確保資料有正確的欄位
+      if (!all(c("customer_id", "buyer_name", "email") %in% colnames(profiles))) {
+        cat("DEBUG: Required fields missing in customer profiles\n")
+        cat("DEBUG: Available fields:", paste(colnames(profiles), collapse=", "), "\n")
+        
+        # Attempt to map common field name variations
+        id_field <- NULL
+        if ("customer_id" %in% colnames(profiles)) {
+          id_field <- "customer_id"
+        } else if ("id" %in% colnames(profiles)) {
+          id_field <- "id"
+        }
+        
+        name_field <- NULL
+        if ("buyer_name" %in% colnames(profiles)) {
+          name_field <- "buyer_name"
+        } else if ("name" %in% colnames(profiles)) {
+          name_field <- "name"
+        } else if ("customer_name" %in% colnames(profiles)) {
+          name_field <- "customer_name"
+        }
+        
+        email_field <- NULL
+        if ("email" %in% colnames(profiles)) {
+          email_field <- "email"
+        } else if ("customer_email" %in% colnames(profiles)) {
+          email_field <- "customer_email"
+        }
+        
+        # If we can map all required fields, use them
+        if (!is.null(id_field) && !is.null(name_field)) {
+          cat("DEBUG: Using mapped fields: id=", id_field, ", name=", name_field, 
+              if (!is.null(email_field)) paste(", email=", email_field, sep="") else "", "\n")
+        } else {
+          # Otherwise, let the user know fields are missing
+          updateSelectizeInput(
+            session = session,
+            inputId = "customer_filter",
+            choices = c("-- 客戶資料格式無效 --" = "")
+          )
+          return()
+        }
+      } else {
+        # Standard field names
+        id_field <- "customer_id"
+        name_field <- "buyer_name"
+        email_field <- "email"
+      }
+      
+      # R90: ID關係驗證 - 只顯示有DNA數據的客戶
+      if (length(valid_ids) > 0) {
+        # MP52: 單向數據流 - 過濾用戶設置檔的數據
+        filtered_profiles <- profiles %>% 
+          dplyr::filter(.data[[id_field]] %in% valid_ids)
+        
+        if (nrow2(filtered_profiles) == 0) {
+          cat("DEBUG: No customers matched between profiles and DNA data\n")
+          updateSelectizeInput(
+            session = session,
+            inputId = "customer_filter",
+            choices = c("-- 無匹配客戶 --" = "")
+          )
+          return()
+        }
+        
+        # 保存完整的客戶數據作為反應式值，以便稍後在搜索時使用
+        all_customer_choices(filtered_profiles)
+        
+        # 性能優化：為 selectize 準備搜索數據
+        # 只加載前100個客戶作為默認選項
+        sample_size <- min(100, nrow2(filtered_profiles))
+        sample_profiles <- filtered_profiles[1:sample_size, ]
+        
+        # P77: 性能優化 - 為UI準備高效的選項
+        if (!is.null(email_field) && email_field %in% colnames(sample_profiles)) {
+          initial_choices <- setNames(
+            as.character(sample_profiles[[id_field]]), 
+            paste0(sample_profiles[[name_field]], " (", sample_profiles[[email_field]], ")")
+          )
+        } else {
+          initial_choices <- setNames(
+            as.character(sample_profiles[[id_field]]),
+            sample_profiles[[name_field]]
+          )
+        }
+        
+        cat("DEBUG: Created", length(initial_choices), "initial customer choices (", 
+            nrow2(filtered_profiles), "total available)\n")
+        
+        # MP53: 回饋循環 - 更新UI以反映可用的客戶
+        updateSelectizeInput(
+          session = session,
+          inputId = "customer_filter", 
+          choices = c("-- 請選擇客戶 --" = "", initial_choices),
+          options = list(
+            placeholder = translate("開始輸入以搜尋客戶..."),
+            maxOptions = 50  # 限制顯示結果數量
+          )
+        )
+        
+        # 添加 JS 代碼以捕獲用戶輸入的搜索詞
+        session$sendCustomMessage(
+          "captureSelectizeInput",
+          list(
+            inputId = session$ns("customer_filter"),
+            searchId = session$ns("customer_search")
+          )
+        )
+      } else {
+        # MP53: 回饋循環 - 沒有有效選項時通知用戶
+        updateSelectizeInput(
+          session = session,
+          inputId = "customer_filter",
+          choices = c("-- 無DNA客戶資料 --" = "")
+        )
+      }
+    })
+    
+    # 添加一次性腳本以捕獲 selectize 搜索事件
+    # 使用自定義觸發器實現一次性執行
+    observer_trigger <- reactiveVal(TRUE)
+    
+    observeEvent(observer_trigger(), {
+      # 確保只執行一次
+      if(!observer_trigger()) return()
+      observer_trigger(FALSE)
+      
+      # 插入腳本到頁面
+      insertUI(
+        selector = "head",
+        where = "beforeEnd",
+        ui = tags$script(HTML("
+          $(document).ready(function() {
+            Shiny.addCustomMessageHandler('captureSelectizeInput', function(message) {
+              setTimeout(function() {
+                var $select = $('#' + message.inputId);
+                if ($select.length && $select[0].selectize) {
+                  var selectize = $select[0].selectize;
+                  
+                  selectize.on('type', function(text) {
+                    if (text.length >= 2) {
+                      Shiny.setInputValue(message.searchId, text);
+                    }
+                  });
+                }
+              }, 500); // 延遲以確保 selectize 已初始化
+            });
+          });
+        "))
+      )
+    })
+    
+    # 處理用戶輸入的搜索詞
+    observeEvent(input$customer_search, {
+      search_term <- input$customer_search
+      
+      # 忽略空搜索詞或太短的搜索詞
+      if (is.null(search_term) || nchar(search_term) < 2) {
+        return()
+      }
+      
+      cat("DEBUG: Processing search term:", search_term, "\n")
+      
+      # 獲取完整的客戶數據
+      filtered_profiles <- all_customer_choices()
+      
+      if (is.null(filtered_profiles) || nrow2(filtered_profiles) == 0) {
+        return()
+      }
+      
+      # 確定欄位名稱
+      name_field <- if ("buyer_name" %in% colnames(filtered_profiles)) "buyer_name" else
+        if ("name" %in% colnames(filtered_profiles)) "name" else 
+          if ("customer_name" %in% colnames(filtered_profiles)) "customer_name" else NULL
+      
+      email_field <- if ("email" %in% colnames(filtered_profiles)) "email" else
+        if ("customer_email" %in% colnames(filtered_profiles)) "customer_email" else NULL
+      
+      id_field <- if ("customer_id" %in% colnames(filtered_profiles)) "customer_id" else
+        if ("id" %in% colnames(filtered_profiles)) "id" else NULL
+      
+      if (is.null(name_field) || is.null(id_field)) {
+        return()
+      }
+      
+      # 基於搜索詞篩選
+      search_in_name <- grepl(search_term, filtered_profiles[[name_field]], ignore.case = TRUE)
+      search_in_email <- if (!is.null(email_field)) {
+        grepl(search_term, filtered_profiles[[email_field]], ignore.case = TRUE)
+      } else {
+        rep(FALSE, nrow2(filtered_profiles))
+      }
+      
+      matching_rows <- which(search_in_name | search_in_email)
+      
+      # 限制結果數量
+      max_results <- min(50, length(matching_rows))
+      if (max_results > 0) {
+        matching_profiles <- filtered_profiles[matching_rows[1:max_results], ]
+        
+        # 創建選項
+        if (!is.null(email_field) && email_field %in% colnames(matching_profiles)) {
+          search_choices <- setNames(
+            as.character(matching_profiles[[id_field]]), 
+            paste0(matching_profiles[[name_field]], " (", matching_profiles[[email_field]], ")")
+          )
+        } else {
+          search_choices <- setNames(
+            as.character(matching_profiles[[id_field]]),
+            matching_profiles[[name_field]]
+          )
+        }
+        
+        # 更新選擇器的選項
+        updateSelectizeInput(
+          session = session,
+          inputId = "customer_filter", 
+          choices = c("-- 請選擇客戶 --" = "", search_choices)
+        )
+        
+        cat("DEBUG: Updated selectize with", length(search_choices), "matching choices\n")
+      }
+    }, ignoreNULL = TRUE, ignoreInit = TRUE)
+    
+    # == 客戶選擇響應 - 當用戶選擇客戶時更新數據 ==
+    observeEvent(input$customer_filter, {
+      selected_value <- input$customer_filter
+      cat("DEBUG: customer_filter changed to", selected_value, "\n")
+      
+      # Add additional debugging for filter changes
+      platform_id <- platform_filter()
+      cat("DEBUG: Current platform filter when customer_filter changes:", 
+          if(is.null(platform_id)) "NULL" else platform_id, "\n")
+      
+      # Get data with implicit reactivity
+      profiles <- tryCatch({
+        df_customer_profile()
+      }, error = function(e) {
+        cat("ERROR getting customer profiles:", e$message, "\n")
+        NULL
+      })
+      
+      dna_data <- tryCatch({
+        df_dna_by_customer()
+      }, error = function(e) {
+        cat("ERROR getting DNA data:", e$message, "\n")
+        NULL
+      })
+      
+      if (is.null(profiles) || is.null(dna_data)) {
+        cat("DEBUG: Data sources are NULL or unavailable\n")
+        cat("DEBUG: profiles is", if(is.null(profiles)) "NULL" else "available", "\n")
+        cat("DEBUG: dna_data is", if(is.null(dna_data)) "NULL" else "available", "\n")
+        
+        if (!is.null(platform_id) && platform_id > 0) {
+          cat("NOTICE: No customers found for platform ID:", platform_id, "\n")
+          # Show a more user-friendly message
+          showNotification(
+            paste("No customer data available for the selected platform (ID:", platform_id, ")"),
+            type = "warning",
+            duration = 5
+          )
+        }
+        return()
+      }
+      
+      # Identify field names in the datasets
+      id_field <- if ("customer_id" %in% colnames(profiles)) "customer_id" else "id"
+      
+      # 只在有選擇時進行篩選
+      if (!is.null(selected_value) && selected_value != "") {
+        # R89: ID類型轉換規則 - 確保ID為整數
+        selected_customer_id <- as.integer(selected_value)
+        cat("DEBUG: Selected customer ID:", selected_customer_id, "\n")
+        
+        # R90: ID關係驗證 - 確認客戶存在
+        if (!selected_customer_id %in% profiles[[id_field]]) {
+          cat("DEBUG: Invalid customer ID - not found in profiles\n")
+          # MP53: 回饋循環 - 通知用戶無效選擇
+          showNotification("選擇的客戶ID無效", type = "warning")
+          return()
+        }
+        
+        # MP52: 單向數據流 - 按ID過濾兩個數據源
+        filtered_customer <- profiles %>%
+          dplyr::filter(.data[[id_field]] == selected_customer_id)
+        
+        filtered_dna <- dna_data %>%
+          dplyr::filter(customer_id == selected_customer_id)
+        
+        # R90: 關係驗證 - 確認客戶有DNA數據
+        if (nrow2(filtered_dna) == 0) {
+          cat("DEBUG: Customer has no DNA data\n")
+          # MP53: 回饋循環 - 通知用戶沒有數據
+          showNotification("所選客戶無DNA資料", type = "warning")
+          filtered_data(data.frame())
+          return()
+        }
+        
+        # MP52: 單向數據流 - 合併資料以供顯示
+        if (nrow2(filtered_dna) > 0 && nrow2(filtered_customer) > 0) {
+          # Find common join field
+          if (id_field == "customer_id") {
+            result <- dplyr::left_join(filtered_dna, filtered_customer, by = "customer_id")
+          } else {
+            result <- dplyr::left_join(filtered_dna, filtered_customer, 
+                                       by = c("customer_id" = id_field))
+          }
+          filtered_data(result)
+        } else {
+          # 若找不到匹配的資料，返回空資料框
+          filtered_data(data.frame())
+        }
+      } else if (!is.null(dna_data) && nrow2(dna_data) > 0 &&
+                 !is.null(profiles) && nrow2(profiles) > 0) {
+        # 若無選擇但有數據，顯示第一位有DNA數據的客戶
+        valid_ids <- valid_customer_ids()
+        
+        if (length(valid_ids) > 0) {
+          # R89: ID類型轉換 - 確保ID為整數
+          first_customer_id <- as.integer(valid_ids[1])
+          
+          filtered_dna <- dna_data %>% 
+            dplyr::filter(customer_id == first_customer_id)
+          
+          if (id_field == "customer_id") {
+            filtered_customer <- profiles %>% 
+              dplyr::filter(customer_id == first_customer_id)
+            result <- dplyr::left_join(filtered_dna, filtered_customer, by = "customer_id")
+          } else {
+            filtered_customer <- profiles %>% 
+              dplyr::filter(.data[[id_field]] == first_customer_id)
+            result <- dplyr::left_join(filtered_dna, filtered_customer, 
+                                       by = c("customer_id" = id_field))
+          }
+          
+          filtered_data(result)
+        } else {
+          # 若無有效客戶，返回空資料框
+          filtered_data(data.frame())
+        }
+      } else {
+        # 若無選擇且無數據，返回空資料框
+        filtered_data(data.frame())
+      }
+    })
+    
+    # == 清除篩選響應 ==
+    observeEvent(input$clear_filter, {
+      cat("DEBUG: clear_filter button clicked\n")
+      
+      # R88: Shiny模組ID處理 - 正確更新UI元素
+      updateSelectizeInput(session, "customer_filter", selected = "")
+      
+      # P76: 錯誤處理
+      profiles <- df_customer_profile()
+      dna_data <- df_dna_by_customer()
+      
+      if (is.null(profiles) || is.null(dna_data)) {
+        cat("DEBUG: Data sources are NULL\n")
+        return()
+      }
+      
+      # Identify field names
+      id_field <- if ("customer_id" %in% colnames(profiles)) "customer_id" else "id"
+      
+      # 自動選擇第一位客戶
+      valid_ids <- valid_customer_ids()
+      if (length(valid_ids) > 0) {
+        # R89: ID類型轉換 - 確保ID為整數
+        first_customer_id <- as.integer(valid_ids[1])
+        
+        filtered_dna <- dna_data %>% 
+          dplyr::filter(customer_id == first_customer_id)
+        
+        if (id_field == "customer_id") {
+          filtered_customer <- profiles %>% 
+            dplyr::filter(customer_id == first_customer_id)
+          result <- dplyr::left_join(filtered_dna, filtered_customer, by = "customer_id")
+        } else {
+          filtered_customer <- profiles %>% 
+            dplyr::filter(.data[[id_field]] == first_customer_id)
+          result <- dplyr::left_join(filtered_dna, filtered_customer, 
+                                     by = c("customer_id" = id_field))
+        }
+        
+        filtered_data(result)
+      } else {
+        # 若無有效客戶，返回空資料框
+        filtered_data(data.frame())
+      }
+    })
+    
+    # == 模組初始化 - 自動選擇第一位客戶 ==
+    observe({
+      # 此反應式表達式處理模組初始化
+      
+      # P76: 錯誤處理
+      profiles <- df_customer_profile()
+      dna_data <- df_dna_by_customer()
+      
+      if (is.null(profiles) || is.null(dna_data)) {
+        return()
+      }
+      
+      # Identify field names
+      id_field <- if ("customer_id" %in% colnames(profiles)) "customer_id" else "id"
+      
+      # 只在還沒有選擇數據時進行初始化
+      if (is.null(filtered_data())) {
+        valid_ids <- valid_customer_ids()
+        
+        if (length(valid_ids) > 0) {
+          # R89: ID類型轉換 - 確保ID為整數
+          first_customer_id <- as.integer(valid_ids[1])
+          
+          # R90: 關係驗證 - 確認客戶存在於兩個數據集
+          if (!first_customer_id %in% profiles[[id_field]] || 
+              !first_customer_id %in% dna_data[["customer_id"]]) {
+            cat("DEBUG: First customer ID is invalid\n")
+            filtered_data(data.frame())
+            return()
+          }
+          
+          filtered_dna <- dna_data %>% 
+            dplyr::filter(customer_id == first_customer_id)
+          
+          if (id_field == "customer_id") {
+            filtered_customer <- profiles %>% 
+              dplyr::filter(customer_id == first_customer_id)
+            result <- dplyr::left_join(filtered_dna, filtered_customer, by = "customer_id")
+          } else {
+            filtered_customer <- profiles %>% 
+              dplyr::filter(.data[[id_field]] == first_customer_id)
+            result <- dplyr::left_join(filtered_dna, filtered_customer, 
+                                       by = c("customer_id" = id_field))
+          }
+          
+          # MP52: 單向數據流 - 合併資料
+          filtered_data(result)
+        } else {
+          # 若無有效客戶，返回空資料框
+          filtered_data(data.frame())
+        }
+      }
+    })
+    
+    # == 顯示功能 - 準備數據以供UI顯示 ==
+    
+    # 選定的客戶資料 - 添加錯誤處理
+    selected_customer_data <- reactive({
+      data <- filtered_data()
+      if (is.null(data) || !is.data.frame(data) || nrow2(data) == 0) {
+        return(NULL)
+      }
+      return(data)
+    })
+    
+    # 安全值存取輔助函數 - 提高強健性
+    safeValue <- function(data, field, default = NA) {
+      # P76: 錯誤處理 - 更強健的值獲取函數
+      if (is.null(data) || !is.data.frame(data) || nrow2(data) == 0 || !field %in% names(data)) {
+        return(default)
+      }
+      value <- data[[field]][1]
+      if (is.null(value) || is.na(value)) {
+        return(default)
+      }
+      return(value)
+    }
+    
+    # == UI輸出渲染 - 將數據呈現在UI中 ==
+    
+    # Check if filter resulted in empty data
+    is_empty_filter_result <- reactive({
+      # Try to safely get valid customer IDs
+      valid_ids <- tryCatch({
+        valid_customer_ids()
+      }, error = function(e) {
+        cat("ERROR in is_empty_filter_result:", e$message, "\n")
+        integer(0)  # Return empty vector on error
+      })
+      
+      # Get profiles and DNA data
+      profiles <- tryCatch({
+        df_customer_profile()
+      }, error = function(e) {
+        NULL
+      })
+      
+      dna_data <- tryCatch({
+        df_dna_by_customer()
+      }, error = function(e) {
+        NULL
+      })
+      
+      # Get current platform filter
+      platform_id <- platform_filter()
+      
+      # Add more detailed logging
+      cat("DEBUG: is_empty_filter_result check - platform_id:", 
+          if(is.null(platform_id)) "NULL" else platform_id, 
+          "- valid_ids count:", length(valid_ids),
+          "- profiles:", if(is.null(profiles)) "NULL" else paste(nrow2(profiles), "rows"),
+          "- dna_data:", if(is.null(dna_data)) "NULL" else paste(nrow2(dna_data), "rows"),
+          "\n")
+      
+      # Check for empty data conditions
+      if (is.null(profiles) || is.null(dna_data)) {
+        # Data sources not available
+        if (!is.null(platform_id) && platform_id > 0) {
+          cat("NOTICE: No data available for platform ID:", platform_id, "\n")
+          return(TRUE)
+        }
+      } else if (length(valid_ids) == 0) {
+        # No valid customer IDs
+        if (!is.null(platform_id) && platform_id > 0) {
+          # Only consider it empty if we're actually filtering by a specific platform (not "All Platforms")
+          cat("NOTICE: No customers found for platform ID:", platform_id, "\n")
+          return(TRUE)
+        }
+      } else if (nrow2(profiles) == 0 || nrow2(dna_data) == 0) {
+        # Empty data frames
+        if (!is.null(platform_id) && platform_id > 0) {
+          cat("NOTICE: Empty data for platform ID:", platform_id, "\n")
+          return(TRUE)
+        }
+      }
+      
+      # Default case - not empty
+      return(FALSE)
+    })
+    
+    # 顯示客戶名稱和電子郵件
+    output$customer_name <- renderUI({
+      # First check if we have empty results due to filtering
+      if (is_empty_filter_result()) {
+        platform_id <- platform_filter()
+        platform_name <- switch(as.character(platform_id),
+                             "5" = "ECSHOP",
+                             "6" = "eBay",
+                             "7" = "Cyberbiz",
+                             paste("Platform", platform_id))
+        
+        return(HTML(paste0(
+          "<span style='font-size: 1.4rem; color: #666;'>",
+          "No customers found for ", platform_name, " platform",
+          "</span>"
+        )))
+      }
+      
+      # MP54: UI-Server對應 - 確保UI元素有伺服器功能
+      customer <- selected_customer_data()
+      if (is.null(customer)) return(HTML("<span>未選擇客戶</span>"))
+      
+      # Find the name field
+      name_field <- NULL
+      if ("buyer_name" %in% colnames(customer)) {
+        name_field <- "buyer_name"
+      } else if ("name" %in% colnames(customer)) {
+        name_field <- "name"
+      } else if ("customer_name" %in% colnames(customer)) {
+        name_field <- "customer_name"
+      }
+      
+      if (is.null(name_field)) {
+        return(HTML("<span>未知客戶</span>"))
+      }
+      
+      name <- safeValue(customer, name_field, default = "未知客戶")
+      HTML(paste0("<span>", name, "</span>"))
+    })
+    
+    output$customer_email <- renderUI({
+      # First check if we have empty results due to filtering
+      if (is_empty_filter_result()) {
+        return(HTML(
+          "<span style='color: #666;'>No customer data available for this platform. Please try selecting a different platform.</span>"
+        ))
+      }
+      
+      # MP54: UI-Server對應 - 確保UI元素有伺服器功能
+      customer <- selected_customer_data()
+      if (is.null(customer)) return(HTML("<span>無電子郵件</span>"))
+      
+      # Find the email field
+      email_field <- NULL
+      if ("email" %in% colnames(customer)) {
+        email_field <- "email"
+      } else if ("customer_email" %in% colnames(customer)) {
+        email_field <- "customer_email"
+      }
+      
+      if (is.null(email_field)) {
+        return(HTML("<span>無電子郵件</span>"))
+      }
+      
+      email <- safeValue(customer, email_field, default = "無電子郵件")
+      HTML(paste0("<span>", email, "</span>"))
+    })
+    
+    # 渲染所有valueBoxes - 使用相同的模式
+    output$dna_time_first <- bs4Dash::renderValueBox({
+      customer <- selected_customer_data()
+      
+      if (is.null(customer)) {
+        value <- defaults$dna_time_first
+        subtitle <- "客戶資歷"
+      } else {
+        time_first <- safeValue(customer, "time_first", default = NA)
+        time_first_to_now <- safeValue(customer, "time_first_to_now", default = NA)
+        
+        if (is.na(time_first)) {
+          value <- defaults$dna_time_first
+        } else {
+          value <- format(time_first, "%Y-%m-%d")
+        }
+        
+        if (is.na(time_first_to_now)) {
+          subtitle <- paste("客戶資歷:", defaults$dna_time_first_to_now, "天")
+        } else {
+          subtitle <- paste("客戶資歷:", time_first_to_now, "天")
+        }
+      }
+      
+      bs4Dash::valueBox(
+        value = value,
+        subtitle = subtitle,
+        icon = icon("calendar"),
+        color = "primary"
+      )
+    })
+    
+    output$dna_recency <- bs4Dash::renderValueBox({
+      customer <- selected_customer_data()
+      
+      if (is.null(customer)) {
+        label <- defaults$dna_r_label
+        value <- defaults$dna_r_value
+      } else {
+        rlabel <- safeValue(customer, "r_label", default = NA)
+        rvalue <- safeValue(customer, "r_value", default = NA)
+        
+        if (is.na(rlabel) || (!is.factor(rlabel) && !is.character(rlabel))) {
+          label <- defaults$dna_r_label
+        } else {
+          label <- as.character(rlabel)
+        }
+        
+        if (is.na(rvalue)) {
+          value <- defaults$dna_r_value
+        } else {
+          value <- rvalue
+        }
+      }
+      
+      # Safely convert value to numeric with error handling
+      r_display_value <- tryCatch({
+        if (is.character(value)) {
+          # Try to convert only if it's a numeric string
+          if (grepl("^[0-9.]+$", value)) {
+            round(as.numeric(value), 2)
+          } else {
+            "N/A"  # Non-numeric string
+          }
+        } else if (is.numeric(value)) {
+          round(value, 2)
+        } else if (is.factor(value)) {
+          # Handle factor values
+          val_str <- as.character(value)
+          if (grepl("^[0-9.]+$", val_str)) {
+            round(as.numeric(val_str), 2)
+          } else {
+            val_str  # Use the factor string representation
+          }
+        } else {
+          "N/A"  # Other non-convertible value
+        }
+      }, error = function(e) {
+        cat("DEBUG: Error converting r_value to numeric:", e$message, "\n")
+        "N/A"  # Return N/A if conversion fails
+      })
+      
+      bs4Dash::valueBox(
+        value = label,
+        subtitle = paste("最近購買日(R):", r_display_value, "天"),
+        icon = icon("clock"),
+        color = "danger"
+      )
+    })
+    
+    output$dna_frequency <- bs4Dash::renderValueBox({
+      customer <- selected_customer_data()
+      
+      if (is.null(customer)) {
+        label <- defaults$dna_f_label
+        value <- defaults$dna_f_value
+      } else {
+        flabel <- safeValue(customer, "f_label", default = NA)
+        fvalue <- safeValue(customer, "f_value", default = NA)
+        
+        if (is.na(flabel) || (!is.factor(flabel) && !is.character(flabel))) {
+          label <- defaults$dna_f_label
+        } else {
+          label <- as.character(flabel)
+        }
+        
+        if (is.na(fvalue)) {
+          value <- defaults$dna_f_value
+        } else {
+          value <- fvalue
+        }
+      }
+      
+      bs4Dash::valueBox(
+        value = label,
+        subtitle = paste("購買頻率(F):", value, "次"),
+        icon = icon("chart-line"),
+        color = "warning"
+      )
+    })
+    
+    output$dna_monetary <- bs4Dash::renderValueBox({
+      customer <- selected_customer_data()
+      
+      if (is.null(customer)) {
+        label <- defaults$dna_m_label
+        value <- defaults$dna_m_value
+      } else {
+        mlabel <- safeValue(customer, "m_label", default = NA)
+        mvalue <- safeValue(customer, "m_value", default = NA)
+        
+        if (is.na(mlabel) || (!is.factor(mlabel) && !is.character(mlabel))) {
+          label <- defaults$dna_m_label
+        } else {
+          label <- as.character(mlabel)
+        }
+        
+        if (is.na(mvalue)) {
+          value <- defaults$dna_m_value
+        } else {
+          value <- round(mvalue, 2)
+        }
+      }
+      
+      bs4Dash::valueBox(
+        value = label,
+        subtitle = paste("購買金額(M):", value),
+        icon = icon("dollar-sign"),
+        color = "success"
+      )
+    })
+    
+    output$dna_cai <- bs4Dash::renderValueBox({
+      customer <- selected_customer_data()
+      
+      if (is.null(customer)) {
+        label <- defaults$dna_cai_label
+        value <- defaults$dna_cai
+      } else {
+        cailabel <- safeValue(customer, "cai_label", default = NA)
+        cai <- safeValue(customer, "cai", default = NA)
+        
+        if (is.na(cailabel) || (!is.factor(cailabel) && !is.character(cailabel))) {
+          label <- defaults$dna_cai_label
+        } else {
+          label <- as.character(cailabel)
+        }
+        
+        if (is.na(cai)) {
+          value <- defaults$dna_cai
+        } else {
+          value <- round(cai, 2)
+        }
+      }
+      
+      bs4Dash::valueBox(
+        value = label,
+        subtitle = paste("顧客活躍度(CAI):", value),
+        icon = icon("user-check"),
+        color = "info"
+      )
+    })
+    
+    output$dna_ipt <- bs4Dash::renderValueBox({
+      customer <- selected_customer_data()
+      
+      if (is.null(customer)) {
+        value <- defaults$dna_ipt_mean
+      } else {
+        ipt_mean <- safeValue(customer, "ipt_mean", default = NA)
+        
+        if (is.na(ipt_mean)) {
+          value <- defaults$dna_ipt_mean
+        } else {
+          value <- round(ipt_mean, 1)
+        }
+      }
+      
+      bs4Dash::valueBox(
+        value = value,
+        subtitle = "顧客平均購買週期(IPT)",
+        icon = icon("calendar-check"),
+        color = "secondary"
+      )
+    })
+    
+    output$dna_pcv <- bs4Dash::renderValueBox({
+      customer <- selected_customer_data()
+      
+      if (is.null(customer)) {
+        value <- defaults$dna_pcv
+      } else {
+        pcv <- safeValue(customer, "pcv", default = NA)
+        
+        if (is.na(pcv)) {
+          value <- defaults$dna_pcv
+        } else {
+          value <- round(pcv, 2)
+        }
+      }
+      
+      bs4Dash::valueBox(
+        value = value,
+        subtitle = "過去價值(PCV)",
+        icon = icon("history"),
+        color = "primary"
+      )
+    })
+    
+    output$dna_clv <- bs4Dash::renderValueBox({
+      customer <- selected_customer_data()
+      
+      if (is.null(customer)) {
+        value <- defaults$dna_clv
+      } else {
+        clv <- safeValue(customer, "clv", default = NA)
+        
+        if (is.na(clv)) {
+          value <- defaults$dna_clv
+        } else {
+          value <- round(clv, 2)
+        }
+      }
+      
+      bs4Dash::valueBox(
+        value = value,
+        subtitle = "顧客終身價值(CLV)",
+        icon = icon("gem"),
+        color = "success"
+      )
+    })
+    
+    output$dna_cri <- bs4Dash::renderValueBox({
+      customer <- selected_customer_data()
+      
+      if (is.null(customer)) {
+        value <- defaults$dna_cri
+      } else {
+        cri <- safeValue(customer, "cri", default = NA)
+        
+        if (is.na(cri)) {
+          value <- defaults$dna_cri
+        } else {
+          value <- round(cri, 2)
+        }
+      }
+      
+      bs4Dash::valueBox(
+        value = value,
+        subtitle = "顧客交易穩定度(CRI)",
+        icon = icon("balance-scale"),
+        color = "warning"
+      )
+    })
+    
+    output$dna_nes <- bs4Dash::renderValueBox({
+      customer <- selected_customer_data()
+      
+      if (is.null(customer)) {
+        value <- defaults$dna_nes_status
+      } else {
+        nesstatus <- safeValue(customer, "nes_status", default = NA)
+        
+        if (is.na(nesstatus)) {
+          value <- defaults$dna_nes_status
+        } else {
+          value <- as.character(nesstatus)
+        }
+      }
+      
+      bs4Dash::valueBox(
+        value = value,
+        subtitle = "顧客狀態(NES)",
+        icon = icon("user-tag"),
+        color = "danger"
+      )
+    })
+    
+    output$dna_nt <- bs4Dash::renderValueBox({
+      customer <- selected_customer_data()
+      
+      if (is.null(customer)) {
+        value <- defaults$dna_nt
+      } else {
+        nt <- safeValue(customer, "nt", default = NA)
+        
+        if (is.na(nt)) {
+          value <- defaults$dna_nt
+        } else {
+          value <- round(nt, 2)
+        }
+      }
+      
+      bs4Dash::valueBox(
+        value = value,
+        subtitle = "新客單價",
+        icon = icon("user-plus"),
+        color = "info"
+      )
+    })
+    
+    output$dna_e0t <- bs4Dash::renderValueBox({
+      customer <- selected_customer_data()
+      
+      if (is.null(customer)) {
+        value <- defaults$dna_e0t
+      } else {
+        e0t <- safeValue(customer, "e0t", default = NA)
+        
+        if (is.na(e0t)) {
+          value <- defaults$dna_e0t
+        } else {
+          value <- round(e0t, 2)
+        }
+      }
+      
+      bs4Dash::valueBox(
+        value = value,
+        subtitle = "主力客單價",
+        icon = icon("star"),
+        color = "secondary"
+      )
+    })
+    
+    
+    # 返回篩選後的資料
+    return(filtered_data)
+  })
+}
+
+####microCustomerComponent####
+
+#' Create a Micro Customer component with Enhanced Data Access
+#'
+#' Integrates the filter and display components following R116 Enhanced Data Access Pattern.
+#' This function returns a component that can be used as a whole or by individual parts 
+#' within union components.
+#'
+#' @param id Module ID
+#' @param app_data_connection App data connection (any supported connection type)
+#' @param config Optional configuration parameters
+#' @param translate Translation function, defaults to identity function
+#'
+#' @return A list containing UI elements and server function
+#' @export
+#' @principle MP56 Connected Component Principle
+
+microCustomerComponent <- function(id, app_data_connection = NULL, config = NULL, translate = function(x) x) {
+  # R88: 不使用自定义namespace后缀，防止双重命名空间问题
+  # 使用Shiny内置的命名空间机制
+  
+  # Return the components as a structured list for flexible component access
+  list(
+    ui = list(
+      filter = microCustomerFilterUI(id, translate),
+      display = microCustomerDisplayUI(id)
+    ),
+    server = function(input, output, session) {
+      # Pass the config parameter correctly - the module will handle both reactive and non-reactive cases
+      filtered_data <- microCustomerServer(
+        id, 
+        app_data_connection,
+        session = session,
+        config = config  # This might be a reactive or a regular value
+      )
+      
+      # Return the filtered data for potential outside use
+      return(filtered_data)
+    }
+  )
+}
+
+#' @rdname microCustomerComponent
+#' @export
+#' @principle R12 Minimal Modification
+#' @deprecated Please use microCustomerComponent instead
+
+
+####microCustomerInitialize####
+
+microCustomerInitialize <- function(id, app_data_connection = NULL, config = NULL, translate = function(x) x) {
+  # Create alias for backward compatibility
+  # Pass parameters directly to ensure reactive expressions are preserved
+  microCustomerComponent(id, app_data_connection, config, translate)
+}
+
+####initServerSideSelectize####
+
+# 新增的服務器端函數，負責處理 selectize 的選項
+initServerSideSelectize <- function(session, inputId, df, labelFields, valueField, maxItems = 1000) {
+  # 設置服務器端 selectize 搜索處理函數
+  session$sendCustomMessage("updateSelectizeInput", list(
+    inputId = session$ns(inputId),
+    settings = list(
+      load = I(paste0(
+        "(query, callback) => {
+          if (!query.length) return callback();
+          Shiny.setInputValue('", 
+        session$ns(paste0(inputId, "_search")),
+        "', {query: query, item_count: ", maxItems, "}, {priority: 'event'});
+        }"
+      ))
+    )
+  ))
+  
+  return(reactive({
+    if (is.null(input[[paste0(inputId, "_search")]])) {
+      return(NULL)
+    }
+    
+    query <- input[[paste0(inputId, "_search")]]$query
+    maxResults <- input[[paste0(inputId, "_search")]]$item_count
+    
+    if (is.null(query) || query == "") {
+      return(NULL)
+    }
+    
+    # 使用簡單的模糊匹配算法
+    # 在真實環境中可能需要更複雜的搜索邏輯
+    filteredData <- df
+    for (field in labelFields) {
+      # 只處理包含查詢內容的行
+      if (nrow2(filteredData) > 0) {
+        filteredData <- filteredData[grepl(query, filteredData[[field]], ignore.case = TRUE), ]
+      }
+    }
+    
+    # 將結果限制為指定數量
+    if (nrow2(filteredData) > maxResults) {
+      filteredData <- filteredData[1:maxResults, ]
+    }
+    
+    # 格式化結果
+    results <- list()
+    if (nrow2(filteredData) > 0) {
+      # 創建標籤 - 根據可用欄位組合
+      labels <- if (length(labelFields) > 1) {
+        apply(filteredData[, labelFields, drop = FALSE], 1, function(row) {
+          paste(na.omit(row), collapse = " - ")
+        })
+      } else {
+        filteredData[[labelFields[1]]]
+      }
+      
+      # 建立選項列表
+      results <- mapply(
+        function(label, value) {
+          list(label = label, value = value)
+        },
+        labels, filteredData[[valueField]],
+        SIMPLIFY = FALSE
+      )
+    }
+    
+    return(results)
+  }))
+}

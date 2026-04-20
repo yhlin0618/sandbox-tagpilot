@@ -1,0 +1,197 @@
+# 測試microCustomer模組的腳本
+library(shiny)
+library(bs4Dash)
+library(dplyr)
+
+# 載入模組
+
+source(file.path("update_scripts", "global_scripts", "00_principles", 
+          "sc_initialization_app_mode.R"))
+
+# 創建測試數據
+create_test_data <- function() {
+  # 測試數據1：客戶基本資料
+  df_customer_profile <- data.frame(
+    customer_id = c(1001, 1002, 1003),
+    buyer_name = c("aaa", "王小美", "李大同"),
+    email = c("zhang@example.com", "wang@example.com", "li@example.com"),
+    phone = c("0912345678", "0923456789", "0934567890"),
+    stringsAsFactors = FALSE
+  )
+  
+  # 測試數據2：客戶DNA分析數據
+  df_dna_by_customer <- data.frame(
+    customer_id = c(1001, 1002, 1003),
+    time_first = as.Date(c("2022-01-15", "2021-03-20", "2020-11-05")),
+    time_first_to_now = c(450, 780, 920),
+    r_label = as.factor(c(1, 3, 5)),
+    r_value = c(5, 45, 120),
+    f_label = as.factor(c(4, 2, 3)),
+    f_value = c(12, 4, 8),
+    m_label = as.factor(c(5, 2, 3)),
+    m_value = c(15000, 3500, 7800),
+    cai_label = as.factor(c(4, 2, 3)),
+    cai = c(0.85, 0.35, 0.55),
+    ipt_mean = c(38.5, 97.2, 65.8),
+    pcv = c(180000, 15000, 62400),
+    clv = c(250000, 25000, 89000),
+    cri = c(0.92, 0.45, 0.72),
+    nrec = c(0.75, 0.35, 0.55),
+    nes_status = as.factor(c("主力型", "沉睡型", "成長型")),
+    nt = c(1500, 900, 1200),
+    e0t = c(2500, 1500, 1800)
+  )
+  
+  # 測試數據3：缺少某些欄位的DNA數據
+  df_dna_incomplete <- data.frame(
+    customer_id = c(1004, 1005),
+    time_first = as.Date(c("2023-02-10", "2022-07-15")),
+    time_first_to_now = c(180, 300),
+    r_label = as.factor(c(2, 4)),
+    r_value = c(15, 90),
+    f_label = as.factor(c(1, 2)),
+    f_value = c(2, 5)
+    # 故意缺少其他欄位
+  )
+  
+  # 測試數據4：沒有共同ID的數據
+  df_customer_no_match <- data.frame(
+    customer_id = c(2001, 2002),
+    buyer_name = c("陳大明", "林小華"),
+    email = c("chen@example.com", "lin@example.com"),
+    stringsAsFactors = FALSE
+  )
+  
+  return(list(
+    df_customer_profile = df_customer_profile,
+    df_dna_by_customer = df_dna_by_customer,
+    df_dna_incomplete = df_dna_incomplete,
+    df_customer_no_match = df_customer_no_match
+  ))
+}
+
+# 創建測試應用
+create_test_app <- function() {
+  # 獲取測試數據
+  test_data <- create_test_data()
+  
+  # 定義UI
+  ui <- fluidPage(
+    title = "microCustomer模組測試",
+    
+    # CSS樣式
+    tags$head(
+      tags$style(HTML("
+        .test-control-panel {
+          background-color: #f8f9fa;
+          padding: 15px;
+          margin-bottom: 20px;
+          border-radius: 5px;
+          border: 1px solid #dee2e6;
+        }
+        .test-header {
+          margin-bottom: 20px;
+          padding-bottom: 10px;
+          border-bottom: 1px solid #dee2e6;
+        }
+      "))
+    ),
+    
+    # 測試標題
+    div(class = "test-header",
+        h1("microCustomer模組測試"),
+        p("本測試應用用於驗證客戶分析模組的功能和可用性")
+    ),
+    
+    # 測試控制面板
+    div(class = "test-control-panel",
+        fluidRow(
+          column(12,
+                 h3("測試控制"),
+                 selectizeInput("test_scenario", "選擇測試場景：",
+                             choices = c(
+                               "完整數據" = "complete",
+                               "不完整數據" = "incomplete",
+                               "空數據" = "empty"
+                             ),
+                             selected = "complete"
+                 ),
+                 hr(),
+                 checkboxInput("show_filter", "顯示篩選界面", value = TRUE)
+          )
+        )
+    ),
+    
+    # 測試結果區域
+    fluidRow(
+      column(12,
+             h3("模組測試結果"),
+             conditionalPanel(
+               condition = "input.show_filter == true",
+               microCustomerFilterUI("test_module")
+        
+             ),
+             div(
+               style = "border: 1px solid #dee2e6; border-radius: 5px; padding: 15px; margin-top: 20px;",
+               microCustomerUI("test_module")
+             )
+      )
+    ),
+    
+    # 調試信息
+    fluidRow(
+      column(12,
+             h3("調試信息"),
+             verbatimTextOutput("debug_info")
+      )
+    )
+  )
+  
+  # 定義Server
+  server <- function(input, output, session) {
+    # 根據選擇的測試場景設置數據
+    current_df_dna <- reactive({
+      if (input$test_scenario == "complete") {
+        return(test_data$df_dna_by_customer)
+      } else if (input$test_scenario == "incomplete") {
+        return(test_data$df_dna_incomplete)
+      } else {
+        return(NULL)
+      }
+    })
+    
+    current_df_profile <- reactive({
+      if (input$test_scenario == "complete" || input$test_scenario == "incomplete") {
+        return(test_data$df_customer_profile)
+      } else {
+        return(NULL)
+      }
+    })
+    
+    # 使用新的整合伺服器模組
+    filtered_data <- microCustomerServer(
+      "test_module", 
+      current_df_dna(), 
+      current_df_profile()#,
+      # filter_id = "filter",
+      # display_id = "display"
+    )
+    
+    # 顯示調試信息
+    output$debug_info <- renderPrint({
+      list(
+        test_scenario = input$test_scenario,
+        dna_rows = if(!is.null(current_df_dna())) nrow(current_df_dna()) else 0,
+        profile_rows = if(!is.null(current_df_profile())) nrow(current_df_profile()) else 0,
+        filtered_rows = if(!is.null(filtered_data()) && is.data.frame(filtered_data())) nrow(filtered_data()) else 0
+      )
+    })
+  }
+  
+  # 運行應用
+  shinyApp(ui, server)
+}
+
+# 運行測試應用
+create_test_app()
+
